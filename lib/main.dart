@@ -361,7 +361,19 @@ ${buffer.toString()}''';
       generated = await OpenAIClient.generateDescription(apiKey: apiKey, prompt: prompt);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('AI generation failed: $e')));
+      final msg = '$e'.toLowerCase();
+      final isAuth = msg.contains('401') ||
+          msg.contains('invalid_api_key') ||
+          msg.contains('incorrect api key') ||
+          msg.contains('invalid authentication');
+      if (isAuth) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Invalid OpenAI API key — please update it.')),
+        );
+        await _promptForApiKey();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('AI generation failed: $e')));
+      }
       return;
     }
 
@@ -1907,9 +1919,13 @@ class _StudentAiAnalysisScreenState extends State<StudentAiAnalysisScreen> {
 
 Be concise and practical, and base every statement on the provided data. If the data are insufficient to support a conclusion, say so explicitly rather than speculating. End with a one-line disclaimer that this is AI-generated decision support and not a substitute for a comprehensive FBA conducted by a qualified professional.''';
 
+  final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
+  late String _apiKey = widget.apiKey;
+
   bool _loading = true;
   String? _result;
   String? _error;
+  bool _authError = false;
 
   @override
   void initState() {
@@ -1917,14 +1933,31 @@ Be concise and practical, and base every statement on the provided data. If the 
     _run();
   }
 
+  bool _looksLikeAuthError(String message) {
+    final m = message.toLowerCase();
+    return m.contains('401') ||
+        m.contains('invalid_api_key') ||
+        m.contains('incorrect api key') ||
+        m.contains('invalid authentication');
+  }
+
   Future<void> _run() async {
+    if (_apiKey.isEmpty) {
+      setState(() {
+        _loading = false;
+        _authError = true;
+        _error = 'No OpenAI API key set.';
+      });
+      return;
+    }
     setState(() {
       _loading = true;
       _error = null;
+      _authError = false;
     });
     try {
       final text = await OpenAIClient.generateAnalysis(
-        apiKey: widget.apiKey,
+        apiKey: _apiKey,
         systemPrompt: _systemPrompt,
         userPrompt: widget.userPrompt,
       );
@@ -1941,8 +1974,41 @@ Be concise and practical, and base every statement on the provided data. If the 
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = '$e';
+        _authError = _looksLikeAuthError('$e');
+        _error = _authError ? 'Your OpenAI API key is missing or invalid.' : '$e';
       });
+    }
+  }
+
+  Future<void> _updateApiKey() async {
+    final controller = TextEditingController(text: _apiKey);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('OpenAI API Key'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(hintText: 'sk-...'),
+          obscureText: true,
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(dialogContext).pop(), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.of(dialogContext).pop(controller.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (result != null && result.isNotEmpty) {
+      try {
+        await _secureStorage.write(key: 'openai_api_key', value: result);
+      } catch (_) {}
+      if (!mounted) return;
+      setState(() => _apiKey = result);
+      _run();
     }
   }
 
@@ -1964,6 +2030,11 @@ Be concise and practical, and base every statement on the provided data. If the 
                 );
               },
             ),
+          IconButton(
+            icon: const Icon(Icons.key),
+            tooltip: 'Set API key',
+            onPressed: _loading ? null : _updateApiKey,
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'Regenerate',
@@ -1989,11 +2060,23 @@ Be concise and practical, and base every statement on the provided data. If the 
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.error_outline, color: Colors.red, size: 40),
+                        Icon(_authError ? Icons.vpn_key : Icons.error_outline, color: Colors.red, size: 40),
                         const SizedBox(height: 12),
-                        Text('AI analysis failed:\n$_error', textAlign: TextAlign.center),
+                        Text(
+                          _authError
+                              ? '$_error\n\nEnter a valid OpenAI API key to run the analysis.'
+                              : 'AI analysis failed:\n$_error',
+                          textAlign: TextAlign.center,
+                        ),
                         const SizedBox(height: 16),
-                        ElevatedButton(onPressed: _run, child: const Text('Retry')),
+                        if (_authError)
+                          ElevatedButton.icon(
+                            icon: const Icon(Icons.key),
+                            onPressed: _updateApiKey,
+                            label: const Text('Enter API key'),
+                          )
+                        else
+                          ElevatedButton(onPressed: _run, child: const Text('Retry')),
                       ],
                     ),
                   ),
