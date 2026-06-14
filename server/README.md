@@ -31,13 +31,48 @@ API key never has to be hard-coded into the site.
 ANTHROPIC_API_KEY=sk-ant-... dart run server/proxy.dart
 ```
 
+## Hot-reloadable key file (zero-downtime rotation)
+
+Instead of a static `ANTHROPIC_API_KEY` env var, point the proxy at a **file**:
+
+```bash
+ANTHROPIC_API_KEY_FILE=./secrets/anthropic.key dart run server/proxy.dart
+```
+
+The proxy reads this file **fresh on every request**, so rotating the key is just
+overwriting the file — no restart. Use the helper script:
+
+```bash
+# install a new key (created in the Console) — takes effect on the next request
+ANTHROPIC_API_KEY_FILE=./secrets/anthropic.key ./server/rotate-key.sh set sk-ant-NEWKEY
+```
+
+## Rotating keys (server/rotate-key.sh)
+
+Anthropic's Admin API **cannot create** keys (Console-only), so create the new key
+in the Console first, then:
+
+```bash
+export ANTHROPIC_API_KEY_FILE=./secrets/anthropic.key
+export ANTHROPIC_ADMIN_KEY=sk-ant-admin-...     # org accounts only; for list/disable
+
+./server/rotate-key.sh list                      # find the OLD key's id (apikey_...)
+./server/rotate-key.sh rotate sk-ant-NEWKEY apikey_OLDID   # install new + disable old
+```
+
+Other subcommands: `set <new-key>`, `disable <api_key_id>`. The `list`/`disable`
+commands require an **Admin API key** (`sk-ant-admin...`) and an **organization**
+account (the Admin API is unavailable on individual accounts). The secret file is
+written `0600`, and `secrets/` / `*.key` are git-ignored.
+
 ## Environment variables
 
-| Variable            | Default     | Purpose                                   |
-| ------------------- | ----------- | ----------------------------------------- |
-| `PORT`              | `8787`      | Port to listen on                         |
-| `WEB_DIR`           | `build/web` | Directory of the built Flutter web app    |
-| `ANTHROPIC_API_KEY` | _(unset)_   | Optional server-side fallback key         |
+| Variable                 | Default     | Purpose                                            |
+| ------------------------ | ----------- | -------------------------------------------------- |
+| `PORT`                   | `8787`      | Port to listen on                                  |
+| `WEB_DIR`                | `build/web` | Directory of the built Flutter web app             |
+| `ANTHROPIC_API_KEY`      | _(unset)_   | Optional server-side fallback key                  |
+| `ANTHROPIC_API_KEY_FILE` | _(unset)_   | Path to a key file, re-read per request (hot reload); takes precedence over `ANTHROPIC_API_KEY` |
 
 ## Using a separately-hosted proxy
 

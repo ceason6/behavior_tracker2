@@ -12,21 +12,28 @@ import 'dart:io';
 ///   # open http://localhost:8787
 ///
 /// Environment variables:
-///   PORT                port to listen on (default 8787)
-///   WEB_DIR             directory of the built web app (default build/web)
-///   ANTHROPIC_API_KEY   optional server-side key; used when the client request
-///                       does not include an x-api-key header, so the key never
-///                       has to be entered in (or exposed to) the browser.
+///   PORT                  port to listen on (default 8787)
+///   WEB_DIR               directory of the built web app (default build/web)
+///   ANTHROPIC_API_KEY     optional server-side key; used when the client request
+///                         does not include an x-api-key header.
+///   ANTHROPIC_API_KEY_FILE  optional path to a file containing the server-side
+///                         key. Read fresh on every request, so rotating the key
+///                         is as simple as overwriting this file — no restart
+///                         needed (hot reload). Takes precedence over
+///                         ANTHROPIC_API_KEY when the file exists and is non-empty.
 Future<void> main() async {
   final port = int.tryParse(Platform.environment['PORT'] ?? '') ?? 8787;
   final webDir = Platform.environment['WEB_DIR'] ?? 'build/web';
-  final fallbackKey = Platform.environment['ANTHROPIC_API_KEY'];
+  final envKey = Platform.environment['ANTHROPIC_API_KEY'];
+  final keyFile = Platform.environment['ANTHROPIC_API_KEY_FILE'];
 
   final server = await HttpServer.bind(InternetAddress.anyIPv4, port);
   stdout.writeln('ABC Behavior Tracker proxy listening on http://localhost:$port');
   stdout.writeln('Serving web app from: $webDir');
-  if (fallbackKey != null && fallbackKey.isNotEmpty) {
-    stdout.writeln('Using server-side OPENAI_API_KEY for unauthenticated requests.');
+  if (keyFile != null && keyFile.isNotEmpty) {
+    stdout.writeln('Server-side key: reading from $keyFile on each request (hot reload).');
+  } else if (envKey != null && envKey.isNotEmpty) {
+    stdout.writeln('Server-side key: using ANTHROPIC_API_KEY for unauthenticated requests.');
   }
 
   await for (final req in server) {
@@ -38,7 +45,7 @@ Future<void> main() async {
         continue;
       }
       if (req.method == 'POST' && req.uri.path == '/v1/messages') {
-        await _proxyMessages(req, fallbackKey);
+        await _proxyMessages(req, keyFile, envKey);
         continue;
       }
       await _serveStatic(req, webDir);
@@ -51,16 +58,36 @@ Future<void> main() async {
   }
 }
 
+/// Resolves the server-side key fresh per request: the key file (if set and
+/// readable) wins, otherwise the env var. Reading the file each call is what
+/// makes key rotation zero-downtime — overwrite the file and the next request
+/// uses the new key.
+String? _serverKey(String? keyFile, String? envKey) {
+  if (keyFile != null && keyFile.isNotEmpty) {
+    try {
+      final f = File(keyFile);
+      if (f.existsSync()) {
+        final v = f.readAsStringSync().trim();
+        if (v.isNotEmpty) return v;
+      }
+    } catch (_) {
+      // fall through to env key
+    }
+  }
+  return (envKey != null && envKey.isNotEmpty) ? envKey : null;
+}
+
 void _setCors(HttpResponse res) {
   res.headers.set('Access-Control-Allow-Origin', '*');
   res.headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.headers.set('Access-Control-Allow-Headers', 'Content-Type, x-api-key, anthropic-version');
 }
 
-Future<void> _proxyMessages(HttpRequest req, String? fallbackKey) async {
+Future<void> _proxyMessages(HttpRequest req, String? keyFile, String? envKey) async {
   final body = await utf8.decoder.bind(req).join();
-  final apiKey = req.headers.value('x-api-key') ??
-      (fallbackKey != null && fallbackKey.isNotEmpty ? fallbackKey : null);
+  // Client-supplied key wins; otherwise resolve the server-side key fresh
+  // (hot-reloaded from the key file) so rotations take effect without a restart.
+  final apiKey = req.headers.value('x-api-key') ?? _serverKey(keyFile, envKey);
   final version = req.headers.value('anthropic-version') ?? '2023-06-01';
 
   final client = HttpClient();
