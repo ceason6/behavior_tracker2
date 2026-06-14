@@ -199,7 +199,7 @@ class _ABCLoggingScreenState extends State<ABCLoggingScreen> {
   final List<String> antecedents = ["Given demand", "Told to wait", "Given corrective feedback", "Activity transition", "Unexpected change", "Divided attention", "Presence of a specific person", "Left alone", "Activity denied", "Activity interrupted", "Redirection"];
   final List<String> behaviors = ["Verbal aggression", "Threat", "Physical aggression", "Not in designated area", "Leaving building/campus", "Property destruction", "Property misuse", "Stealing"];
   final List<String> consequences = ["Verbal redirection", "Behavior ignored", "Removed from activity", "Removed item", "Reprimand", "Left alone", "Blocked", "Sent to take a break", "Given another activity", "Given preferred item", "Peer remarks", "Being followed by staff"];
-  final List<String> staffMembers = ["RC", "KM", "MM", "KR"];
+  final List<String> staffMembers = ["CE", "GQ", "KM", "KR", "MM", "RC"];
 
   @override
   void initState() {
