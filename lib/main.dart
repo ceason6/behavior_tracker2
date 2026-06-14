@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
@@ -108,6 +109,21 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
   }
 }
 
+/// Resolves the chat-completions endpoint.
+///
+/// - If built with `--dart-define=OPENAI_PROXY=<url>`, calls `<url>/v1/chat/completions`.
+/// - On web (no override), calls the same-origin `/v1/chat/completions` so a
+///   co-hosted proxy (see server/proxy.dart) handles the request without CORS.
+/// - On mobile/desktop, calls the OpenAI API directly.
+String _openAiEndpoint() {
+  const override = String.fromEnvironment('OPENAI_PROXY');
+  if (override.isNotEmpty) {
+    return '${override.replaceAll(RegExp(r'/+$'), '')}/v1/chat/completions';
+  }
+  if (kIsWeb) return '/v1/chat/completions';
+  return 'https://api.openai.com/v1/chat/completions';
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const MyApp());
@@ -136,7 +152,7 @@ class OpenAIClient {
     int maxTokens = 300,
     double temperature = 0.2,
   }) async {
-    final uri = Uri.parse('https://api.openai.com/v1/chat/completions');
+    final uri = Uri.parse(_openAiEndpoint());
     final body = jsonEncode({
       'model': model,
       'messages': [
@@ -388,16 +404,23 @@ ${buffer.toString()}''';
   }
 
   Future<void> _initSpeech() async {
-    _speechEnabled = await _speech.initialize(
-      onStatus: (status) {
-        if (status == 'done' || status == 'notListening') {
+    try {
+      _speechEnabled = await _speech.initialize(
+        onStatus: (status) {
+          if (status == 'done' || status == 'notListening') {
+            if (mounted) setState(() => _isListening = false);
+          }
+        },
+        onError: (errorNotification) {
           if (mounted) setState(() => _isListening = false);
-        }
-      },
-      onError: (errorNotification) {
-        if (mounted) setState(() => _isListening = false);
-      },
-    );
+        },
+      );
+    } catch (error) {
+      // Voice input may be unavailable on some platforms (e.g. desktop);
+      // the app stays fully usable without it.
+      _speechEnabled = false;
+      debugPrint('Speech recognition unavailable: $error');
+    }
     if (mounted) setState(() {});
   }
 

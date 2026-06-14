@@ -1,11 +1,11 @@
 {
-    "name": "behavior_tracker",
-    "short_name": "behavior_tracker",
+    "name": "ABC Behavior Tracker",
+    "short_name": "ABC Tracker",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "ABC Behavior Tracker",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
