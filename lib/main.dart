@@ -1,7 +1,7 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -128,16 +128,23 @@ class MyApp extends StatelessWidget {
 }
 
 class OpenAIClient {
-  static Future<String?> generateDescription({required String apiKey, required String prompt}) async {
+  static Future<String?> _chatCompletion({
+    required String apiKey,
+    required String model,
+    required String systemPrompt,
+    required String userPrompt,
+    int maxTokens = 300,
+    double temperature = 0.2,
+  }) async {
     final uri = Uri.parse('https://api.openai.com/v1/chat/completions');
     final body = jsonEncode({
-      'model': 'gpt-3.5-turbo',
+      'model': model,
       'messages': [
-        {'role': 'system', 'content': 'You are a concise assistant that rewrites user notes.'},
-        {'role': 'user', 'content': prompt}
+        {'role': 'system', 'content': systemPrompt},
+        {'role': 'user', 'content': userPrompt},
       ],
-      'max_tokens': 200,
-      'temperature': 0.2,
+      'max_tokens': maxTokens,
+      'temperature': temperature,
     });
 
     final response = await http.post(
@@ -160,6 +167,34 @@ class OpenAIClient {
     } else {
       throw Exception('OpenAI API error: ${response.statusCode} ${response.body}');
     }
+  }
+
+  /// Rewrites a single incident's notes into a concise clinical description.
+  static Future<String?> generateDescription({required String apiKey, required String prompt}) {
+    return _chatCompletion(
+      apiKey: apiKey,
+      model: 'gpt-3.5-turbo',
+      systemPrompt: 'You are a concise assistant that rewrites user notes.',
+      userPrompt: prompt,
+      maxTokens: 200,
+      temperature: 0.2,
+    );
+  }
+
+  /// Analyzes a student's aggregated ABC data and returns a structured report.
+  static Future<String?> generateAnalysis({
+    required String apiKey,
+    required String systemPrompt,
+    required String userPrompt,
+  }) {
+    return _chatCompletion(
+      apiKey: apiKey,
+      model: 'gpt-4o-mini',
+      systemPrompt: systemPrompt,
+      userPrompt: userPrompt,
+      maxTokens: 1500,
+      temperature: 0.3,
+    );
   }
 }
 
@@ -934,6 +969,7 @@ class StudentHistoryScreen extends StatefulWidget {
 
 class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
   TimeGranularity _granularity = TimeGranularity.daily;
+  final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
 
   String get student => widget.student;
   List<Map<String, dynamic>> get studentLogs => widget.studentLogs;
@@ -1205,6 +1241,138 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not share report: $e')));
     }
+  }
+
+  String _combineLabel(String value, String description) {
+    if (value.isEmpty && description.isEmpty) return '-';
+    if (description.isEmpty) return value;
+    if (value.isEmpty) return description;
+    return '$value ($description)';
+  }
+
+  /// Assembles this student's aggregated ABC data into a prompt for the model.
+  String _buildAnalysisPrompt() {
+    final buf = StringBuffer();
+    buf.writeln('Student: $student');
+    buf.writeln('Total ABC events: ${studentLogs.length}');
+    if (studentLogs.isNotEmpty) {
+      final stamps = studentLogs.map(_logTimestamp).toList()..sort();
+      buf.writeln('Date range: ${_dateKey(stamps.first)} to ${_dateKey(stamps.last)}');
+    }
+    buf.writeln();
+
+    Map<String, int> countBy(String key) {
+      final m = <String, int>{};
+      for (final log in studentLogs) {
+        final v = _logStr(log, key);
+        final label = v.isNotEmpty ? v : 'Unspecified';
+        m[label] = (m[label] ?? 0) + 1;
+      }
+      return m;
+    }
+
+    void section(String title, Map<String, int> m) {
+      buf.writeln('$title:');
+      if (m.isEmpty) {
+        buf.writeln('- none recorded');
+      } else {
+        final entries = m.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+        for (final e in entries) {
+          buf.writeln('- ${e.key}: ${e.value}');
+        }
+      }
+      buf.writeln();
+    }
+
+    section('Behavior frequency', _buildOverallFrequency());
+    section('Antecedent frequency', countBy('antecedent'));
+    section('Consequence frequency', countBy('consequence'));
+    section('Frequency by school period', _buildFrequencyByPeriod());
+    section('Proactive strategies used', _buildProactiveStrategyFrequency());
+
+    final daily = <String, int>{};
+    for (final log in studentLogs) {
+      final k = _dateKey(_logTimestamp(log));
+      daily[k] = (daily[k] ?? 0) + 1;
+    }
+    final dailyEntries = daily.entries.toList()..sort((a, b) => b.key.compareTo(a.key));
+    buf.writeln('Events per day (most recent first):');
+    for (final e in dailyEntries) {
+      buf.writeln('- ${e.key}: ${e.value}');
+    }
+    buf.writeln();
+
+    buf.writeln('Individual ABC records (most recent first):');
+    final limit = studentLogs.length > 50 ? 50 : studentLogs.length;
+    for (var i = 0; i < limit; i++) {
+      final log = studentLogs[i];
+      final period = _logStr(log, 'period');
+      final strategy = _logStr(log, 'proactiveStrategy');
+      final staff = _logStr(log, 'staff');
+      final parts = [
+        _formatDateTime(log),
+        'Period: ${period.isNotEmpty ? period : '-'}',
+        'Antecedent: ${_combineLabel(_logStr(log, 'antecedent'), _logStr(log, 'antecedentDescription'))}',
+        'Behavior: ${_combineLabel(_logStr(log, 'behavior'), _logStr(log, 'behaviorDescription'))}',
+        'Consequence: ${_combineLabel(_logStr(log, 'consequence'), _logStr(log, 'consequenceDescription'))}',
+        'Proactive strategy: ${strategy.isNotEmpty ? strategy : '-'}',
+        'Staff: ${staff.isNotEmpty ? staff : '-'}',
+      ];
+      buf.writeln('${i + 1}. ${parts.join(' | ')}');
+    }
+    if (studentLogs.length > limit) {
+      buf.writeln('(${studentLogs.length - limit} older records omitted)');
+    }
+    return buf.toString();
+  }
+
+  Future<String?> _promptForApiKey() async {
+    final controller = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('OpenAI API Key'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(hintText: 'sk-...'),
+          obscureText: true,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(dialogContext).pop(), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.of(dialogContext).pop(controller.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (result != null && result.isNotEmpty) {
+      try {
+        await _secureStorage.write(key: 'openai_api_key', value: result);
+      } catch (_) {}
+    }
+    return result;
+  }
+
+  Future<void> _openAiAnalysis() async {
+    String? apiKey;
+    try {
+      apiKey = await _secureStorage.read(key: 'openai_api_key');
+    } catch (_) {}
+    if (apiKey == null || apiKey.isEmpty) {
+      if (!mounted) return;
+      apiKey = await _promptForApiKey();
+      if (apiKey == null || apiKey.isEmpty) return;
+    }
+    if (!mounted) return;
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => StudentAiAnalysisScreen(
+        student: student,
+        apiKey: apiKey!,
+        userPrompt: _buildAnalysisPrompt(),
+      ),
+    ));
   }
 
   Widget _buildBehaviorByPeriodChart(Map<String, int> frequencyByPeriod, BuildContext context) {
@@ -1526,6 +1694,11 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
             ? null
             : [
                 IconButton(
+                  icon: const Icon(Icons.psychology),
+                  tooltip: 'AI behavior analysis',
+                  onPressed: _openAiAnalysis,
+                ),
+                IconButton(
                   icon: const Icon(Icons.print),
                   tooltip: 'Print report',
                   onPressed: _printReport,
@@ -1680,6 +1853,160 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
                 }),
               ],
             ),
+    );
+  }
+}
+
+class StudentAiAnalysisScreen extends StatefulWidget {
+  final String student;
+  final String apiKey;
+  final String userPrompt;
+
+  const StudentAiAnalysisScreen({
+    super.key,
+    required this.student,
+    required this.apiKey,
+    required this.userPrompt,
+  });
+
+  @override
+  State<StudentAiAnalysisScreen> createState() => _StudentAiAnalysisScreenState();
+}
+
+class _StudentAiAnalysisScreenState extends State<StudentAiAnalysisScreen> {
+  static const String _systemPrompt = '''You are a board-certified behavior analyst (BCBA) supporting a school team. Using ONLY the ABC (antecedent-behavior-consequence) data provided, produce a structured behavior report with these clearly labeled sections:
+
+1. Summary — a concise overview in 2-4 sentences.
+2. Patterns — notable patterns across antecedents, behaviors, consequences, school periods/times, and trends over time.
+3. Functional Behavior Assessment — for the most significant behavior(s), state the hypothesized function(s) (escape/avoidance, attention, access to tangibles, or sensory/automatic) and cite the specific ABC evidence supporting each hypothesis.
+4. Predicted Escalations — the antecedents, periods, and conditions most likely to precede escalation, plus early warning signs, based on the data.
+5. Evidence-Based Interventions — specific, evidence-based, function-matched strategies (antecedent modifications, teaching replacement behaviors, reinforcement schedules, etc.), each with a one-line rationale tied to the hypothesized function.
+
+Be concise and practical, and base every statement on the provided data. If the data are insufficient to support a conclusion, say so explicitly rather than speculating. End with a one-line disclaimer that this is AI-generated decision support and not a substitute for a comprehensive FBA conducted by a qualified professional.''';
+
+  bool _loading = true;
+  String? _result;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _run();
+  }
+
+  Future<void> _run() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final text = await OpenAIClient.generateAnalysis(
+        apiKey: widget.apiKey,
+        systemPrompt: _systemPrompt,
+        userPrompt: widget.userPrompt,
+      );
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        if (text == null || text.isEmpty) {
+          _error = 'No response from AI.';
+        } else {
+          _result = text;
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = '$e';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('AI Analysis - ${widget.student}'),
+        actions: [
+          if (_result != null)
+            IconButton(
+              icon: const Icon(Icons.copy),
+              tooltip: 'Copy',
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: _result!));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Analysis copied to clipboard')),
+                );
+              },
+            ),
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Regenerate',
+            onPressed: _loading ? null : _run,
+          ),
+        ],
+      ),
+      body: _loading
+          ? const Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Analyzing ABC data…'),
+                ],
+              ),
+            )
+          : _error != null
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24.0),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.error_outline, color: Colors.red, size: 40),
+                        const SizedBox(height: 12),
+                        Text('AI analysis failed:\n$_error', textAlign: TextAlign.center),
+                        const SizedBox(height: 16),
+                        ElevatedButton(onPressed: _run, child: const Text('Retry')),
+                      ],
+                    ),
+                  ),
+                )
+              : ListView(
+                  padding: const EdgeInsets.all(16.0),
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(12.0),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.amber.shade200),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(Icons.info_outline, size: 18, color: Colors.amber.shade800),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'AI-generated decision support based on the recorded ABC data. '
+                              'Not a substitute for a comprehensive FBA by a qualified professional.',
+                              style: TextStyle(fontSize: 12, color: Colors.grey[800]),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    SelectableText(
+                      _result ?? '',
+                      style: theme.textTheme.bodyMedium?.copyWith(height: 1.4),
+                    ),
+                  ],
+                ),
     );
   }
 }
