@@ -124,12 +124,12 @@ class _ABCLoggingScreenState extends State<ABCLoggingScreen> {
   List<Map<String, dynamic>> _savedLogs = [];
   DateTime selectedDateTime = DateTime.now();
 
-  final List<String> students = ["Emma Johnson", "Liam Chen", "Sophia Rodriguez", "Noah Patel", "Olivia Kim"];
+  final List<String> students = ["CH", "EG", "IS", "LTG", "NR"];
   final List<String> periods = ["Bus a.m.", "Advisory", "First", "Second", "Third", "Fourth", "Lunch", "Fifth", "Sixth", "Seventh", "Bus p.m."];
   final List<String> antecedents = ["Given demand", "Told to wait", "Given corrective feedback", "Activity transition", "Unexpected change", "Divided attention", "Presence of a specific person", "Left alone", "Activity denied", "Activity interrupted", "Redirection"];
   final List<String> behaviors = ["Verbal aggression", "Threat", "Physical aggression", "Not in designated area", "Leaving building/campus", "Property destruction", "Property misuse", "Stealing"];
   final List<String> consequences = ["Verbal redirection", "Behavior ignored", "Removed from activity", "Removed item", "Reprimand", "Left alone", "Blocked", "Sent to take a break", "Given another activity", "Given preferred item", "Peer remarks", "Being followed by staff"];
-  final List<String> staffMembers = ["You (Current User)", "Mr. Cool Dude", "Ms. Merry", "Mrs. Rosy"];
+  final List<String> staffMembers = ["RC", "KM", "MM", "KR"];
 
   @override
   void initState() {

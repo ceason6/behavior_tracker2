@@ -32,7 +32,7 @@ void main() {
     // Fill required fields and save the event.
     await tester.tap(find.widgetWithText(DropdownButtonFormField<String>, 'Select Student'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Emma Johnson').last);
+    await tester.tap(find.text('IS').last);
     await tester.pumpAndSettle();
 
     await tester.tap(find.widgetWithText(DropdownButtonFormField<String>, 'Select Period'));
