@@ -41,6 +41,7 @@ dependencies:
   fl_chart: ^0.68.0
   pdf: ^3.11.0
   printing: ^5.13.0
+  flutter_markdown_plus: ^1.0.7
 
 dev_dependencies:
   flutter_test:

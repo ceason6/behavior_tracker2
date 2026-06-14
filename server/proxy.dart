@@ -1,9 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
 
-/// Minimal static-file + OpenAI proxy server for the ABC Behavior Tracker web
-/// build. It serves the compiled Flutter web app AND forwards chat-completion
-/// requests to OpenAI, so the browser never hits a CORS wall (and, optionally,
+/// Minimal static-file + Anthropic proxy server for the ABC Behavior Tracker
+/// web build. It serves the compiled Flutter web app AND forwards Messages API
+/// requests to Anthropic, so the browser never hits a CORS wall (and, optionally,
 /// never has to hold the API key).
 ///
 /// Usage:
@@ -12,15 +12,15 @@ import 'dart:io';
 ///   # open http://localhost:8787
 ///
 /// Environment variables:
-///   PORT             port to listen on (default 8787)
-///   WEB_DIR          directory of the built web app (default build/web)
-///   OPENAI_API_KEY   optional server-side key; used when the client request
-///                    does not include an Authorization header, so the key
-///                    never has to be entered in (or exposed to) the browser.
+///   PORT                port to listen on (default 8787)
+///   WEB_DIR             directory of the built web app (default build/web)
+///   ANTHROPIC_API_KEY   optional server-side key; used when the client request
+///                       does not include an x-api-key header, so the key never
+///                       has to be entered in (or exposed to) the browser.
 Future<void> main() async {
   final port = int.tryParse(Platform.environment['PORT'] ?? '') ?? 8787;
   final webDir = Platform.environment['WEB_DIR'] ?? 'build/web';
-  final fallbackKey = Platform.environment['OPENAI_API_KEY'];
+  final fallbackKey = Platform.environment['ANTHROPIC_API_KEY'];
 
   final server = await HttpServer.bind(InternetAddress.anyIPv4, port);
   stdout.writeln('ABC Behavior Tracker proxy listening on http://localhost:$port');
@@ -37,8 +37,8 @@ Future<void> main() async {
         await req.response.close();
         continue;
       }
-      if (req.method == 'POST' && req.uri.path == '/v1/chat/completions') {
-        await _proxyChat(req, fallbackKey);
+      if (req.method == 'POST' && req.uri.path == '/v1/messages') {
+        await _proxyMessages(req, fallbackKey);
         continue;
       }
       await _serveStatic(req, webDir);
@@ -54,20 +54,21 @@ Future<void> main() async {
 void _setCors(HttpResponse res) {
   res.headers.set('Access-Control-Allow-Origin', '*');
   res.headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+  res.headers.set('Access-Control-Allow-Headers', 'Content-Type, x-api-key, anthropic-version');
 }
 
-Future<void> _proxyChat(HttpRequest req, String? fallbackKey) async {
+Future<void> _proxyMessages(HttpRequest req, String? fallbackKey) async {
   final body = await utf8.decoder.bind(req).join();
-  final auth = req.headers.value('authorization') ??
-      (fallbackKey != null && fallbackKey.isNotEmpty ? 'Bearer $fallbackKey' : null);
+  final apiKey = req.headers.value('x-api-key') ??
+      (fallbackKey != null && fallbackKey.isNotEmpty ? fallbackKey : null);
+  final version = req.headers.value('anthropic-version') ?? '2023-06-01';
 
   final client = HttpClient();
   try {
-    final upstream =
-        await client.postUrl(Uri.parse('https://api.openai.com/v1/chat/completions'));
+    final upstream = await client.postUrl(Uri.parse('https://api.anthropic.com/v1/messages'));
     upstream.headers.set('Content-Type', 'application/json');
-    if (auth != null) upstream.headers.set('Authorization', auth);
+    upstream.headers.set('anthropic-version', version);
+    if (apiKey != null) upstream.headers.set('x-api-key', apiKey);
     upstream.write(body);
     final resp = await upstream.close();
     final respBody = await utf8.decoder.bind(resp).join();

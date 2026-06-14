@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -109,19 +110,19 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
   }
 }
 
-/// Resolves the chat-completions endpoint.
+/// Resolves the Anthropic Messages endpoint.
 ///
-/// - If built with `--dart-define=OPENAI_PROXY=<url>`, calls `<url>/v1/chat/completions`.
-/// - On web (no override), calls the same-origin `/v1/chat/completions` so a
-///   co-hosted proxy (see server/proxy.dart) handles the request without CORS.
-/// - On mobile/desktop, calls the OpenAI API directly.
-String _openAiEndpoint() {
-  const override = String.fromEnvironment('OPENAI_PROXY');
+/// - If built with `--dart-define=ANTHROPIC_PROXY=<url>`, calls `<url>/v1/messages`.
+/// - On web (no override), calls the same-origin `/v1/messages` so a co-hosted
+///   proxy (see server/proxy.dart) handles the request without CORS / key exposure.
+/// - On mobile/desktop, calls the Anthropic API directly.
+String _anthropicEndpoint() {
+  const override = String.fromEnvironment('ANTHROPIC_PROXY');
   if (override.isNotEmpty) {
-    return '${override.replaceAll(RegExp(r'/+$'), '')}/v1/chat/completions';
+    return '${override.replaceAll(RegExp(r'/+$'), '')}/v1/messages';
   }
-  if (kIsWeb) return '/v1/chat/completions';
-  return 'https://api.openai.com/v1/chat/completions';
+  if (kIsWeb) return '/v1/messages';
+  return 'https://api.anthropic.com/v1/messages';
 }
 
 Future<void> main() async {
@@ -143,73 +144,79 @@ class MyApp extends StatelessWidget {
   }
 }
 
-class OpenAIClient {
-  static Future<String?> _chatCompletion({
+class AnthropicClient {
+  // Anthropic's most capable model; see https://platform.claude.com for options.
+  static const String _model = 'claude-opus-4-8';
+
+  static Future<String?> _message({
     required String apiKey,
-    required String model,
     required String systemPrompt,
     required String userPrompt,
-    int maxTokens = 300,
-    double temperature = 0.2,
+    required int maxTokens,
+    bool thinking = false,
   }) async {
-    final uri = Uri.parse(_openAiEndpoint());
-    final body = jsonEncode({
-      'model': model,
+    final uri = Uri.parse(_anthropicEndpoint());
+    final payload = <String, dynamic>{
+      'model': _model,
+      'max_tokens': maxTokens,
+      'system': systemPrompt,
       'messages': [
-        {'role': 'system', 'content': systemPrompt},
         {'role': 'user', 'content': userPrompt},
       ],
-      'max_tokens': maxTokens,
-      'temperature': temperature,
-    });
+      if (thinking) 'thinking': {'type': 'adaptive'},
+    };
 
     final response = await http.post(
       uri,
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $apiKey',
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
       },
-      body: body,
+      body: jsonEncode(payload),
     );
 
     if (response.statusCode == 200) {
       final Map<String, dynamic> decoded = jsonDecode(response.body) as Map<String, dynamic>;
-      final choices = decoded['choices'] as List<dynamic>?;
-      if (choices != null && choices.isNotEmpty) {
-        final message = choices[0]['message'] as Map<String, dynamic>?;
-        return message != null ? (message['content'] as String?)?.trim() : null;
+      final content = decoded['content'] as List<dynamic>?;
+      if (content != null) {
+        // Response is a list of blocks; return the first text block (skipping
+        // any thinking blocks that precede it).
+        for (final block in content) {
+          if (block is Map && block['type'] == 'text') {
+            return (block['text'] as String?)?.trim();
+          }
+        }
       }
       return null;
     } else {
-      throw Exception('OpenAI API error: ${response.statusCode} ${response.body}');
+      throw Exception('Anthropic API error: ${response.statusCode} ${response.body}');
     }
   }
 
   /// Rewrites a single incident's notes into a concise clinical description.
   static Future<String?> generateDescription({required String apiKey, required String prompt}) {
-    return _chatCompletion(
+    return _message(
       apiKey: apiKey,
-      model: 'gpt-3.5-turbo',
-      systemPrompt: 'You are a concise assistant that rewrites user notes.',
+      systemPrompt: 'You are a concise assistant that rewrites user notes into a neutral, clinical description.',
       userPrompt: prompt,
-      maxTokens: 200,
-      temperature: 0.2,
+      maxTokens: 400,
     );
   }
 
   /// Analyzes a student's aggregated ABC data and returns a structured report.
+  /// Uses adaptive thinking for higher-quality clinical reasoning.
   static Future<String?> generateAnalysis({
     required String apiKey,
     required String systemPrompt,
     required String userPrompt,
   }) {
-    return _chatCompletion(
+    return _message(
       apiKey: apiKey,
-      model: 'gpt-4o-mini',
       systemPrompt: systemPrompt,
       userPrompt: userPrompt,
-      maxTokens: 1500,
-      temperature: 0.3,
+      maxTokens: 4000,
+      thinking: true,
     );
   }
 }
@@ -281,14 +288,14 @@ class _ABCLoggingScreenState extends State<ABCLoggingScreen> {
 
   Future<String?> _getStoredApiKey() async {
     try {
-      return await _secureStorage.read(key: 'openai_api_key');
+      return await _secureStorage.read(key: 'anthropic_api_key');
     } catch (_) {
       return null;
     }
   }
 
   Future<void> _storeApiKey(String key) async {
-    await _secureStorage.write(key: 'openai_api_key', value: key.trim());
+    await _secureStorage.write(key: 'anthropic_api_key', value: key.trim());
   }
 
   Future<void> _promptForApiKey() async {
@@ -301,10 +308,10 @@ class _ABCLoggingScreenState extends State<ABCLoggingScreen> {
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('OpenAI API Key'),
+          title: const Text('Anthropic API Key'),
           content: TextField(
             controller: controller,
-            decoration: const InputDecoration(hintText: 'sk-...'),
+            decoration: const InputDecoration(hintText: 'sk-ant-...'),
             obscureText: true,
           ),
           actions: [
@@ -358,19 +365,26 @@ ${buffer.toString()}''';
 
     String? generated;
     try {
-      generated = await OpenAIClient.generateDescription(apiKey: apiKey, prompt: prompt);
+      generated = await AnthropicClient.generateDescription(apiKey: apiKey, prompt: prompt);
     } catch (e) {
       if (!mounted) return;
       final msg = '$e'.toLowerCase();
       final isAuth = msg.contains('401') ||
+          msg.contains('authentication_error') ||
+          msg.contains('invalid x-api-key') ||
           msg.contains('invalid_api_key') ||
           msg.contains('incorrect api key') ||
           msg.contains('invalid authentication');
+      final isBilling = msg.contains('credit balance') || msg.contains('billing') || msg.contains('insufficient');
       if (isAuth) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Invalid OpenAI API key — please update it.')),
+          const SnackBar(content: Text('Invalid Anthropic API key — please update it.')),
         );
         await _promptForApiKey();
+      } else if (isBilling) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Anthropic account out of credits — add credits at console.anthropic.com.')),
+        );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('AI generation failed: $e')));
       }
@@ -408,7 +422,7 @@ ${buffer.toString()}''';
         behaviorDescController.text = description;
         _lastAiMeta = {
           'generated': true,
-          'model': 'gpt-3.5-turbo',
+          'model': 'claude-opus-4-8',
           'timestamp': DateTime.now().toIso8601String(),
         };
       });
@@ -1366,10 +1380,10 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
     final result = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('OpenAI API Key'),
+        title: const Text('Anthropic API Key'),
         content: TextField(
           controller: controller,
-          decoration: const InputDecoration(hintText: 'sk-...'),
+          decoration: const InputDecoration(hintText: 'sk-ant-...'),
           obscureText: true,
         ),
         actions: [
@@ -1384,7 +1398,7 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
     controller.dispose();
     if (result != null && result.isNotEmpty) {
       try {
-        await _secureStorage.write(key: 'openai_api_key', value: result);
+        await _secureStorage.write(key: 'anthropic_api_key', value: result);
       } catch (_) {}
     }
     return result;
@@ -1393,7 +1407,7 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
   Future<void> _openAiAnalysis() async {
     String? apiKey;
     try {
-      apiKey = await _secureStorage.read(key: 'openai_api_key');
+      apiKey = await _secureStorage.read(key: 'anthropic_api_key');
     } catch (_) {}
     if (apiKey == null || apiKey.isEmpty) {
       if (!mounted) return;
@@ -1936,9 +1950,16 @@ Be concise and practical, and base every statement on the provided data. If the 
   bool _looksLikeAuthError(String message) {
     final m = message.toLowerCase();
     return m.contains('401') ||
+        m.contains('authentication_error') ||
+        m.contains('invalid x-api-key') ||
         m.contains('invalid_api_key') ||
         m.contains('incorrect api key') ||
         m.contains('invalid authentication');
+  }
+
+  bool _looksLikeBillingError(String message) {
+    final m = message.toLowerCase();
+    return m.contains('credit balance') || m.contains('billing') || m.contains('insufficient');
   }
 
   Future<void> _run() async {
@@ -1946,7 +1967,7 @@ Be concise and practical, and base every statement on the provided data. If the 
       setState(() {
         _loading = false;
         _authError = true;
-        _error = 'No OpenAI API key set.';
+        _error = 'No Anthropic API key set.';
       });
       return;
     }
@@ -1956,7 +1977,7 @@ Be concise and practical, and base every statement on the provided data. If the 
       _authError = false;
     });
     try {
-      final text = await OpenAIClient.generateAnalysis(
+      final text = await AnthropicClient.generateAnalysis(
         apiKey: _apiKey,
         systemPrompt: _systemPrompt,
         userPrompt: widget.userPrompt,
@@ -1975,7 +1996,14 @@ Be concise and practical, and base every statement on the provided data. If the 
       setState(() {
         _loading = false;
         _authError = _looksLikeAuthError('$e');
-        _error = _authError ? 'Your OpenAI API key is missing or invalid.' : '$e';
+        if (_authError) {
+          _error = 'Your Anthropic API key is missing or invalid.';
+        } else if (_looksLikeBillingError('$e')) {
+          _error = 'Your Anthropic account is out of credits. Add credits at '
+              'console.anthropic.com (Plans & Billing), then retry.';
+        } else {
+          _error = '$e';
+        }
       });
     }
   }
@@ -1985,10 +2013,10 @@ Be concise and practical, and base every statement on the provided data. If the 
     final result = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('OpenAI API Key'),
+        title: const Text('Anthropic API Key'),
         content: TextField(
           controller: controller,
-          decoration: const InputDecoration(hintText: 'sk-...'),
+          decoration: const InputDecoration(hintText: 'sk-ant-...'),
           obscureText: true,
           autofocus: true,
         ),
@@ -2004,7 +2032,7 @@ Be concise and practical, and base every statement on the provided data. If the 
     controller.dispose();
     if (result != null && result.isNotEmpty) {
       try {
-        await _secureStorage.write(key: 'openai_api_key', value: result);
+        await _secureStorage.write(key: 'anthropic_api_key', value: result);
       } catch (_) {}
       if (!mounted) return;
       setState(() => _apiKey = result);
@@ -2064,7 +2092,7 @@ Be concise and practical, and base every statement on the provided data. If the 
                         const SizedBox(height: 12),
                         Text(
                           _authError
-                              ? '$_error\n\nEnter a valid OpenAI API key to run the analysis.'
+                              ? '$_error\n\nEnter a valid Anthropic API key to run the analysis.'
                               : 'AI analysis failed:\n$_error',
                           textAlign: TextAlign.center,
                         ),
@@ -2107,9 +2135,12 @@ Be concise and practical, and base every statement on the provided data. If the 
                       ),
                     ),
                     const SizedBox(height: 16),
-                    SelectableText(
-                      _result ?? '',
-                      style: theme.textTheme.bodyMedium?.copyWith(height: 1.4),
+                    MarkdownBody(
+                      data: _result ?? '',
+                      selectable: true,
+                      styleSheet: MarkdownStyleSheet.fromTheme(theme).copyWith(
+                        p: theme.textTheme.bodyMedium?.copyWith(height: 1.4),
+                      ),
                     ),
                   ],
                 ),
