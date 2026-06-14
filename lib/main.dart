@@ -174,6 +174,7 @@ class _ABCLoggingScreenState extends State<ABCLoggingScreen> {
   String? selectedAntecedent;
   String? selectedBehavior;
   String? selectedConsequence;
+  String? selectedProactiveStrategy;
   String? selectedStaff;
 
   final antecedentDescController = TextEditingController();
@@ -200,6 +201,21 @@ class _ABCLoggingScreenState extends State<ABCLoggingScreen> {
   final List<String> behaviors = ["Verbal aggression", "Threat", "Physical aggression", "Not in designated area", "Leaving building/campus", "Property destruction", "Property misuse", "Stealing"];
   final List<String> consequences = ["Verbal redirection", "Behavior ignored", "Removed from activity", "Removed item", "Reprimand", "Left alone", "Blocked", "Sent to take a break", "Given another activity", "Given preferred item", "Peer remarks", "Being followed by staff"];
   final List<String> staffMembers = ["CE", "GQ", "KM", "KR", "MM", "RC"];
+  final List<String> proactiveStrategies = [
+    "Countdown Before Transitions",
+    "None",
+    "Offer Choices",
+    "Other",
+    "Positive Interaction",
+    "Proactive Brief Break",
+    "Provide Neutral Positive Interaction",
+    "Reduce Unstructured Time",
+    "Self-Monitoring Check-In",
+    "Teach Expected Behavior",
+    "Timed Work Intervals",
+    "Transition Support",
+    "Use of Clear Expectations",
+  ];
 
   @override
   void initState() {
@@ -391,6 +407,7 @@ ${buffer.toString()}''';
       'behaviorDescription': behaviorDescController.text,
       'consequence': selectedConsequence ?? '',
       'consequenceDescription': consequenceDescController.text,
+      'proactiveStrategy': selectedProactiveStrategy ?? '',
       'staff': selectedStaff ?? '',
       'timestamp': selectedDateTime.toIso8601String(),
       'ai': _lastAiMeta ?? {},
@@ -506,6 +523,7 @@ ${buffer.toString()}''';
       selectedAntecedent = null;
       selectedBehavior = null;
       selectedConsequence = null;
+      selectedProactiveStrategy = null;
       selectedStaff = null;
       antecedentDescController.clear();
       behaviorDescController.clear();
@@ -713,6 +731,18 @@ ${buffer.toString()}''';
                 maxLines: 2,
               ),
               const SizedBox(height: 24),
+
+              Text("Proactive Strategies", style: sectionHeadingStyle),
+              DropdownButtonFormField<String>(
+                initialValue: selectedProactiveStrategy,
+                isExpanded: true,
+                hint: const Text("Select a proactive strategy"),
+                items: proactiveStrategies
+                    .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                    .toList(),
+                onChanged: (v) => setState(() => selectedProactiveStrategy = v),
+              ),
+              const SizedBox(height: 24),
               Text("Logged by", style: sectionHeadingStyle),
               DropdownButtonFormField<String>(
                 initialValue: selectedStaff,
@@ -774,6 +804,10 @@ ${buffer.toString()}''';
                           if (_logStr(log, 'consequenceDescription').isNotEmpty) ...[
                             const SizedBox(height: 4),
                             Text('Consequence: ${_logStr(log, 'consequenceDescription')}'),
+                          ],
+                          if (_logStr(log, 'proactiveStrategy').isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text('Proactive strategy: ${_logStr(log, 'proactiveStrategy')}'),
                           ],
                           if (_logStr(log, 'staff').isNotEmpty) ...[
                             const SizedBox(height: 4),
@@ -863,6 +897,10 @@ class HistoryScreen extends StatelessWidget {
                               const SizedBox(height: 4),
                               Text('Consequence: ${_logStr(log, 'consequenceDescription')}'),
                             ],
+                            if (_logStr(log, 'proactiveStrategy').isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text('Proactive strategy: ${_logStr(log, 'proactiveStrategy')}'),
+                            ],
                             if (_logStr(log, 'staff').isNotEmpty) ...[
                               const SizedBox(height: 4),
                               Text('Logged by: ${_logStr(log, 'staff')}'),
@@ -941,6 +979,82 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
       frequency[period] = (frequency[period] ?? 0) + 1;
     }
     return frequency;
+  }
+
+  /// Counts how often each proactive strategy was used. Logs without a recorded
+  /// strategy are not counted.
+  Map<String, int> _buildProactiveStrategyFrequency() {
+    final frequency = <String, int>{};
+    for (final log in studentLogs) {
+      final strategy = _logStr(log, 'proactiveStrategy');
+      if (strategy.isEmpty) continue;
+      frequency[strategy] = (frequency[strategy] ?? 0) + 1;
+    }
+    return frequency;
+  }
+
+  Widget _buildProactiveStrategyTable(BuildContext context) {
+    final theme = Theme.of(context);
+    final subtitleStyle = theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600);
+    final labelStyle = theme.textTheme.bodyMedium?.copyWith(color: Colors.grey[700]);
+    final frequency = _buildProactiveStrategyFrequency();
+
+    if (frequency.isEmpty) {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(14.0),
+          child: Text('No proactive strategies recorded yet.', style: labelStyle),
+        ),
+      );
+    }
+
+    final entries = frequency.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
+    final total = entries.fold<int>(0, (sum, e) => sum + e.value);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Strategies used by frequency', style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(child: Text('Strategy', style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600))),
+                  const SizedBox(width: 16),
+                  Text('Count', style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+                  const SizedBox(width: 24),
+                  Text('Share', style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+            const Divider(),
+            ...entries.map((entry) {
+              final share = total > 0 ? (entry.value / total) * 100 : 0.0;
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(child: Text(entry.key, style: labelStyle)),
+                    const SizedBox(width: 16),
+                    Text(entry.value.toString(), style: subtitleStyle),
+                    const SizedBox(width: 24),
+                    Text('${share.toStringAsFixed(1)}%', style: subtitleStyle),
+                  ],
+                ),
+              );
+            }),
+            const SizedBox(height: 12),
+            Text('Total strategies recorded: $total', style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[700])),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _buildBehaviorByPeriodChart(Map<String, int> frequencyByPeriod, BuildContext context) {
@@ -1318,6 +1432,10 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
                   ),
                 ),
                 const SizedBox(height: 24),
+                Text('Proactive Strategies Used', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 12),
+                _buildProactiveStrategyTable(context),
+                const SizedBox(height: 24),
                 _buildBehaviorByPeriodChart(_buildFrequencyByPeriod(), context),
                 const SizedBox(height: 24),
                 Text('Behavior Frequency & Trend', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
@@ -1380,6 +1498,10 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
                           ],
                           if (_logStr(log, 'consequenceDescription').isNotEmpty) ...[
                             Text('Consequence: ${_logStr(log, 'consequenceDescription')}'),
+                            const SizedBox(height: 4),
+                          ],
+                          if (_logStr(log, 'proactiveStrategy').isNotEmpty) ...[
+                            Text('Proactive strategy: ${_logStr(log, 'proactiveStrategy')}'),
                             const SizedBox(height: 4),
                           ],
                           if (_logStr(log, 'staff').isNotEmpty) ...[
