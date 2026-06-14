@@ -34,6 +34,76 @@ String _dateKey(DateTime timestamp) {
   return '${local.year}-${_two(local.month)}-${_two(local.day)}';
 }
 
+/// Time bucket granularities for the aggregate behavior charts.
+enum TimeGranularity { daily, weekly, monthly, yearly }
+
+extension TimeGranularityLabel on TimeGranularity {
+  String get label {
+    switch (this) {
+      case TimeGranularity.daily:
+        return 'Daily';
+      case TimeGranularity.weekly:
+        return 'Weekly';
+      case TimeGranularity.monthly:
+        return 'Monthly';
+      case TimeGranularity.yearly:
+        return 'Yearly';
+    }
+  }
+
+  /// Singular noun used in summary captions, e.g. "Events per day".
+  String get unit {
+    switch (this) {
+      case TimeGranularity.daily:
+        return 'day';
+      case TimeGranularity.weekly:
+        return 'week';
+      case TimeGranularity.monthly:
+        return 'month';
+      case TimeGranularity.yearly:
+        return 'year';
+    }
+  }
+}
+
+/// Monday-anchored start of the week containing [d] (date-only).
+DateTime _weekStart(DateTime d) {
+  final dateOnly = DateTime(d.year, d.month, d.day);
+  return dateOnly.subtract(Duration(days: dateOnly.weekday - 1));
+}
+
+/// A sortable bucket key for [timestamp] at the given [granularity].
+/// Keys sort lexicographically into chronological order.
+String _bucketKey(DateTime timestamp, TimeGranularity granularity) {
+  final d = timestamp.toLocal();
+  switch (granularity) {
+    case TimeGranularity.daily:
+      return '${d.year}-${_two(d.month)}-${_two(d.day)}';
+    case TimeGranularity.weekly:
+      final w = _weekStart(d);
+      return '${w.year}-${_two(w.month)}-${_two(w.day)}';
+    case TimeGranularity.monthly:
+      return '${d.year}-${_two(d.month)}';
+    case TimeGranularity.yearly:
+      return '${d.year}';
+  }
+}
+
+/// Short axis label for a [bucketKey] produced by [_bucketKey].
+String _bucketLabel(String bucketKey, TimeGranularity granularity) {
+  final parts = bucketKey.split('-');
+  switch (granularity) {
+    case TimeGranularity.daily:
+      return '${parts[1]}/${parts[2]}';
+    case TimeGranularity.weekly:
+      return '${parts[1]}/${parts[2]}';
+    case TimeGranularity.monthly:
+      return '${parts[1]}/${parts[0].substring(2)}';
+    case TimeGranularity.yearly:
+      return parts[0];
+  }
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const MyApp());
@@ -810,11 +880,21 @@ class HistoryScreen extends StatelessWidget {
   }
 }
 
-class StudentHistoryScreen extends StatelessWidget {
+class StudentHistoryScreen extends StatefulWidget {
   final String student;
   final List<Map<String, dynamic>> studentLogs;
 
   const StudentHistoryScreen({super.key, required this.student, required this.studentLogs});
+
+  @override
+  State<StudentHistoryScreen> createState() => _StudentHistoryScreenState();
+}
+
+class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
+  TimeGranularity _granularity = TimeGranularity.daily;
+
+  String get student => widget.student;
+  List<Map<String, dynamic>> get studentLogs => widget.studentLogs;
 
   String _formatDateTime(Map<String, dynamic> log) {
     final date = _logTimestamp(log).toLocal();
@@ -963,24 +1043,132 @@ class StudentHistoryScreen extends StatelessWidget {
     );
   }
 
-  Map<String, int> _buildDailyFrequencyData() {
-    final dailyData = <String, int>{};
+  /// Total event counts bucketed by the current [_granularity], sorted
+  /// chronologically (bucket keys sort lexicographically into time order).
+  List<MapEntry<String, int>> _eventCountsByBucket() {
+    final data = <String, int>{};
     for (final log in studentLogs) {
-      final dateKey = _dateKey(_logTimestamp(log));
-      dailyData[dateKey] = (dailyData[dateKey] ?? 0) + 1;
+      final key = _bucketKey(_logTimestamp(log), _granularity);
+      data[key] = (data[key] ?? 0) + 1;
     }
-    return dailyData;
+    return data.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
   }
 
-  Widget _buildDailyBehaviorChart(BuildContext context) {
-    final dailyData = _buildDailyFrequencyData();
-    if (dailyData.isEmpty) {
-      return const SizedBox.shrink();
-    }
+  /// Thins x-axis labels to ~7 evenly spaced entries so dense ranges stay legible.
+  bool _showLabelAt(int index, int total) {
+    if (total <= 0) return false;
+    final step = (total / 7).ceil().clamp(1, total);
+    return index % step == 0;
+  }
 
-    final sortedDates = dailyData.keys.toList()..sort();
-    final counts = sortedDates.map((date) => dailyData[date]!.toDouble()).toList();
-    final maxCount = counts.isNotEmpty ? counts.reduce((a, b) => a > b ? a : b) : 0.0;
+  Widget _granularitySelector() {
+    return SizedBox(
+      width: double.infinity,
+      child: SegmentedButton<TimeGranularity>(
+        showSelectedIcon: false,
+        segments: TimeGranularity.values
+            .map((g) => ButtonSegment<TimeGranularity>(value: g, label: Text(g.label)))
+            .toList(),
+        selected: {_granularity},
+        onSelectionChanged: (selection) {
+          setState(() => _granularity = selection.first);
+        },
+      ),
+    );
+  }
+
+  Widget _buildAggregateFrequencyChart(BuildContext context) {
+    final entries = _eventCountsByBucket();
+    if (entries.isEmpty) return const SizedBox.shrink();
+
+    final keys = entries.map((e) => e.key).toList();
+    final counts = entries.map((e) => e.value).toList();
+    final maxCount = counts.reduce((a, b) => a > b ? a : b);
+    final theme = Theme.of(context);
+    final n = keys.length;
+    final barWidth = n > 24 ? 6.0 : (n > 12 ? 10.0 : 18.0);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${_granularity.label} Behavior Frequency',
+              style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              height: 250,
+              child: BarChart(
+                BarChartData(
+                  alignment: BarChartAlignment.spaceAround,
+                  maxY: (maxCount.toDouble() + 2).ceilToDouble(),
+                  barTouchData: BarTouchData(enabled: true),
+                  titlesData: FlTitlesData(
+                    show: true,
+                    leftTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: true, reservedSize: 40),
+                    ),
+                    bottomTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        getTitlesWidget: (value, meta) {
+                          final index = value.toInt();
+                          if (index < 0 || index >= keys.length || !_showLabelAt(index, keys.length)) {
+                            return const Text('');
+                          }
+                          return Transform.rotate(
+                            angle: -0.3,
+                            child: Text(
+                              _bucketLabel(keys[index], _granularity),
+                              style: const TextStyle(fontSize: 9),
+                              textAlign: TextAlign.center,
+                            ),
+                          );
+                        },
+                        reservedSize: 44,
+                      ),
+                    ),
+                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  ),
+                  gridData: const FlGridData(show: true, drawHorizontalLine: true, drawVerticalLine: false),
+                  barGroups: List.generate(
+                    keys.length,
+                    (index) => BarChartGroupData(
+                      x: index,
+                      barRods: [
+                        BarChartRodData(
+                          toY: counts[index].toDouble(),
+                          color: Colors.indigo,
+                          width: barWidth,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Events per ${_granularity.unit}',
+              style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[700]),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAggregateTrendChart(BuildContext context) {
+    final entries = _eventCountsByBucket();
+    if (entries.isEmpty) return const SizedBox.shrink();
+
+    final keys = entries.map((e) => e.key).toList();
+    final counts = entries.map((e) => e.value.toDouble()).toList();
+    final maxCount = counts.reduce((a, b) => a > b ? a : b);
     final theme = Theme.of(context);
 
     return Card(
@@ -990,7 +1178,7 @@ class StudentHistoryScreen extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Daily Behavior Trend',
+              '${_granularity.label} Behavior Trend',
               style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 16),
@@ -1009,13 +1197,11 @@ class StudentHistoryScreen extends StatelessWidget {
                         showTitles: true,
                         getTitlesWidget: (value, meta) {
                           final index = value.toInt();
-                          if (index < 0 || index >= sortedDates.length) {
+                          if (index < 0 || index >= keys.length || !_showLabelAt(index, keys.length)) {
                             return const Text('');
                           }
-                          final date = sortedDates[index];
-                          final parts = date.split('-');
                           return Text(
-                            '${parts[1]}/${parts[2]}',
+                            _bucketLabel(keys[index], _granularity),
                             style: const TextStyle(fontSize: 9),
                             textAlign: TextAlign.center,
                           );
@@ -1030,7 +1216,7 @@ class StudentHistoryScreen extends StatelessWidget {
                   lineBarsData: [
                     LineChartBarData(
                       spots: List.generate(
-                        sortedDates.length,
+                        keys.length,
                         (index) => FlSpot(index.toDouble(), counts[index]),
                       ),
                       isCurved: true,
@@ -1048,24 +1234,11 @@ class StudentHistoryScreen extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             Text(
-              'Events per day',
+              'Total events over time (per ${_granularity.unit})',
               style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[700]),
             ),
-            const SizedBox(height: 8),
-            ...sortedDates.asMap().entries.map((e) {
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 3.0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(e.value, style: theme.textTheme.bodySmall),
-                    Text(dailyData[e.value].toString(), style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
-                  ],
-                ),
-              );
-            }),
           ],
         ),
       ),
@@ -1147,7 +1320,13 @@ class StudentHistoryScreen extends StatelessWidget {
                 const SizedBox(height: 24),
                 _buildBehaviorByPeriodChart(_buildFrequencyByPeriod(), context),
                 const SizedBox(height: 24),
-                _buildDailyBehaviorChart(context),
+                Text('Behavior Frequency & Trend', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 12),
+                _granularitySelector(),
+                const SizedBox(height: 16),
+                _buildAggregateFrequencyChart(context),
+                const SizedBox(height: 24),
+                _buildAggregateTrendChart(context),
                 const SizedBox(height: 24),
                 Text('Daily Behavior Frequency', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 12),
