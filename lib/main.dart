@@ -1,6 +1,10 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:speech_to_text/speech_recognition_result.dart';
@@ -1057,6 +1061,152 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
     );
   }
 
+  String _nowStamp() {
+    final n = DateTime.now().toLocal();
+    return '${n.year}-${_two(n.month)}-${_two(n.day)} ${_two(n.hour)}:${_two(n.minute)}';
+  }
+
+  /// Builds a printable / downloadable PDF summary report for this student.
+  Future<Uint8List> _buildReportPdf() async {
+    final doc = pw.Document();
+
+    final overall = _buildOverallFrequency();
+    final overallEntries = overall.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+    final totalEvents = overall.values.fold<int>(0, (s, v) => s + v);
+
+    final strategies = _buildProactiveStrategyFrequency();
+    final strategyEntries = strategies.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
+    final totalStrategies = strategies.values.fold<int>(0, (s, v) => s + v);
+
+    final byPeriod = _buildFrequencyByPeriod();
+    final periodEntries = byPeriod.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+
+    final dailyData = <String, int>{};
+    for (final log in studentLogs) {
+      final key = _dateKey(_logTimestamp(log));
+      dailyData[key] = (dailyData[key] ?? 0) + 1;
+    }
+    final dailyEntries = dailyData.entries.toList()..sort((a, b) => b.key.compareTo(a.key));
+
+    final sectionStyle = pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold);
+    String share(int value, int total) => total > 0 ? '${(value / total * 100).toStringAsFixed(1)}%' : '0.0%';
+
+    doc.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.letter,
+        margin: const pw.EdgeInsets.all(28),
+        build: (context) => [
+          pw.Text('ABC Behavior Report', style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold)),
+          pw.SizedBox(height: 4),
+          pw.Text('Student: $student', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+          pw.Text('Generated: ${_nowStamp()}'),
+          pw.Text('Total events: $totalEvents'),
+          pw.Divider(),
+          pw.SizedBox(height: 8),
+
+          pw.Text('Behavior Summary', style: sectionStyle),
+          pw.SizedBox(height: 6),
+          if (overallEntries.isEmpty)
+            pw.Text('No behaviors recorded.')
+          else
+            pw.TableHelper.fromTextArray(
+              headers: ['Behavior', 'Count', 'Share'],
+              data: overallEntries.map((e) => [e.key, e.value.toString(), share(e.value, totalEvents)]).toList(),
+              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+              cellAlignment: pw.Alignment.centerLeft,
+            ),
+          pw.SizedBox(height: 16),
+
+          pw.Text('Proactive Strategies Used', style: sectionStyle),
+          pw.SizedBox(height: 6),
+          if (strategyEntries.isEmpty)
+            pw.Text('No proactive strategies recorded.')
+          else
+            pw.TableHelper.fromTextArray(
+              headers: ['Strategy', 'Count', 'Share'],
+              data: strategyEntries.map((e) => [e.key, e.value.toString(), share(e.value, totalStrategies)]).toList(),
+              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+              cellAlignment: pw.Alignment.centerLeft,
+            ),
+          pw.SizedBox(height: 16),
+
+          pw.Text('Frequency by School Period', style: sectionStyle),
+          pw.SizedBox(height: 6),
+          if (periodEntries.isEmpty)
+            pw.Text('No periods recorded.')
+          else
+            pw.TableHelper.fromTextArray(
+              headers: ['Period', 'Count'],
+              data: periodEntries.map((e) => [e.key, e.value.toString()]).toList(),
+              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+              cellAlignment: pw.Alignment.centerLeft,
+            ),
+          pw.SizedBox(height: 16),
+
+          pw.Text('Daily Frequency', style: sectionStyle),
+          pw.SizedBox(height: 6),
+          pw.TableHelper.fromTextArray(
+            headers: ['Date', 'Events'],
+            data: dailyEntries.map((e) => [e.key, e.value.toString()]).toList(),
+            headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+            cellAlignment: pw.Alignment.centerLeft,
+          ),
+          pw.SizedBox(height: 16),
+
+          pw.Text('Detailed Logs', style: sectionStyle),
+          pw.SizedBox(height: 6),
+          ...studentLogs.map((log) {
+            final lines = <pw.Widget>[
+              pw.Text('${_logStr(log, 'behavior')}  •  ${_formatDateTime(log)}',
+                  style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+            ];
+            void add(String label, String key) {
+              final v = _logStr(log, key);
+              if (v.isNotEmpty) lines.add(pw.Text('$label: $v'));
+            }
+            add('Period', 'period');
+            add('Antecedent', 'antecedentDescription');
+            add('Behavior', 'behaviorDescription');
+            add('Consequence', 'consequenceDescription');
+            add('Proactive strategy', 'proactiveStrategy');
+            add('Logged by', 'staff');
+            return pw.Container(
+              margin: const pw.EdgeInsets.only(bottom: 8),
+              padding: const pw.EdgeInsets.all(8),
+              decoration: pw.BoxDecoration(
+                border: pw.Border.all(width: 0.5, color: PdfColors.grey400),
+                borderRadius: pw.BorderRadius.circular(4),
+              ),
+              child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: lines),
+            );
+          }),
+        ],
+      ),
+    );
+
+    return doc.save();
+  }
+
+  Future<void> _printReport() async {
+    try {
+      await Printing.layoutPdf(onLayout: (format) => _buildReportPdf());
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not print report: $e')));
+    }
+  }
+
+  Future<void> _shareReport() async {
+    try {
+      final bytes = await _buildReportPdf();
+      final safeName = student.replaceAll(RegExp(r'[^A-Za-z0-9_-]+'), '_');
+      await Printing.sharePdf(bytes: bytes, filename: 'ABC_Report_$safeName.pdf');
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not share report: $e')));
+    }
+  }
+
   Widget _buildBehaviorByPeriodChart(Map<String, int> frequencyByPeriod, BuildContext context) {
     if (frequencyByPeriod.isEmpty) {
       return const SizedBox.shrink();
@@ -1370,7 +1520,23 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
     final frequencyLabelStyle = theme.textTheme.bodyMedium?.copyWith(color: Colors.grey[700]);
 
     return Scaffold(
-      appBar: AppBar(title: Text('Past Logs - $student')),
+      appBar: AppBar(
+        title: Text('Past Logs - $student'),
+        actions: studentLogs.isEmpty
+            ? null
+            : [
+                IconButton(
+                  icon: const Icon(Icons.print),
+                  tooltip: 'Print report',
+                  onPressed: _printReport,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.ios_share),
+                  tooltip: 'Download / share report',
+                  onPressed: _shareReport,
+                ),
+              ],
+      ),
       body: studentLogs.isEmpty
           ? Center(child: Text('No past logs for $student yet.'))
           : ListView(

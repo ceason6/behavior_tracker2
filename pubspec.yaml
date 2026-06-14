@@ -39,6 +39,8 @@ dependencies:
   http: ^1.2.2
   flutter_secure_storage: ^9.0.0
   fl_chart: ^0.68.0
+  pdf: ^3.11.0
+  printing: ^5.13.0
 
 dev_dependencies:
   flutter_test:
