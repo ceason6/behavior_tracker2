@@ -626,19 +626,14 @@ ${buffer.toString()}''';
       final logEntry = _buildLogEntry();
       setState(() {
         _savedLogs.insert(0, logEntry);
-        _lastAiMeta = null;
       });
       await _persistSavedLogs();
       if (!mounted) return;
 
+      // Clear the form automatically so it's ready for the next entry.
+      _resetForm();
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('✅ ABC Event Saved!'),
-          action: SnackBarAction(
-            label: 'Log Another Behavior',
-            onPressed: _resetForm,
-          ),
-        ),
+        const SnackBar(content: Text('✅ ABC Event Saved!')),
       );
     }
   }

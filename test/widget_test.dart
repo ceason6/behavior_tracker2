@@ -54,10 +54,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('✅ ABC Event Saved!'), findsOneWidget);
-    expect(find.text('Log Another Behavior'), findsOneWidget);
 
-    await tester.tap(find.text('Log Another Behavior'));
-    await tester.pumpAndSettle();
-    expect(find.text('Log Another Behavior'), findsNothing);
+    // The form clears automatically after saving, so the dropdown hints return.
+    expect(find.text('Select Student'), findsOneWidget);
+    expect(find.widgetWithText(DropdownButtonFormField<String>, 'What did the student do?'), findsOneWidget);
   });
 }
