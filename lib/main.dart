@@ -170,8 +170,10 @@ class AnthropicClient {
       uri,
       headers: {
         'content-type': 'application/json',
-        'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
+        // Only send a key if we have one. When empty (web), the same-origin
+        // proxy injects the server-side key instead.
+        if (apiKey.isNotEmpty) 'x-api-key': apiKey,
       },
       body: jsonEncode(payload),
     );
@@ -333,8 +335,10 @@ class _ABCLoggingScreenState extends State<ABCLoggingScreen> {
   }
 
   Future<void> _generateDescription() async {
-    final apiKey = await _getStoredApiKey();
-    if (apiKey == null || apiKey.isEmpty) {
+    final apiKey = await _getStoredApiKey() ?? '';
+    // On web the same-origin proxy supplies the server-side key, so a per-user
+    // key isn't required. On mobile/desktop we call Anthropic directly.
+    if (!kIsWeb && apiKey.isEmpty) {
       await _promptForApiKey();
       return;
     }
@@ -1404,7 +1408,9 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
     try {
       apiKey = await _secureStorage.read(key: 'anthropic_api_key');
     } catch (_) {}
-    if (apiKey == null || apiKey.isEmpty) {
+    // On web the same-origin proxy supplies the server-side key, so a per-user
+    // key isn't required. On mobile/desktop we call Anthropic directly.
+    if (!kIsWeb && (apiKey == null || apiKey.isEmpty)) {
       if (!mounted) return;
       apiKey = await _promptForApiKey();
       if (apiKey == null || apiKey.isEmpty) return;
@@ -1413,7 +1419,7 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
     Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => StudentAiAnalysisScreen(
         student: student,
-        apiKey: apiKey!,
+        apiKey: apiKey ?? '',
         userPrompt: _buildAnalysisPrompt(),
       ),
     ));
@@ -1958,7 +1964,9 @@ Be concise and practical, and base every statement on the provided data. If the 
   }
 
   Future<void> _run() async {
-    if (_apiKey.isEmpty) {
+    // On web an empty key is fine — the same-origin proxy supplies the
+    // server-side key. On mobile/desktop a key is required.
+    if (!kIsWeb && _apiKey.isEmpty) {
       setState(() {
         _loading = false;
         _authError = true;
