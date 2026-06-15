@@ -335,9 +335,9 @@ class _ABCLoggingScreenState extends State<ABCLoggingScreen> {
   }
 
   Future<void> _generateDescription() async {
-    final apiKey = await _getStoredApiKey() ?? '';
-    // On web the same-origin proxy supplies the server-side key, so a per-user
-    // key isn't required. On mobile/desktop we call Anthropic directly.
+    // On web the same-origin proxy supplies the server-side key; never send a
+    // per-user/browser key (it would override the server key at the proxy).
+    final apiKey = kIsWeb ? '' : (await _getStoredApiKey() ?? '');
     if (!kIsWeb && apiKey.isEmpty) {
       await _promptForApiKey();
       return;
@@ -1405,15 +1405,19 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
 
   Future<void> _openAiAnalysis() async {
     String? apiKey;
-    try {
-      apiKey = await _secureStorage.read(key: 'anthropic_api_key');
-    } catch (_) {}
-    // On web the same-origin proxy supplies the server-side key, so a per-user
-    // key isn't required. On mobile/desktop we call Anthropic directly.
-    if (!kIsWeb && (apiKey == null || apiKey.isEmpty)) {
-      if (!mounted) return;
-      apiKey = await _promptForApiKey();
-      if (apiKey == null || apiKey.isEmpty) return;
+    // On web the same-origin proxy supplies the server-side key, and we must
+    // NOT send a per-user/browser key (it would override the server key at the
+    // proxy). Only read/prompt for a key on mobile/desktop, which call Anthropic
+    // directly.
+    if (!kIsWeb) {
+      try {
+        apiKey = await _secureStorage.read(key: 'anthropic_api_key');
+      } catch (_) {}
+      if (apiKey == null || apiKey.isEmpty) {
+        if (!mounted) return;
+        apiKey = await _promptForApiKey();
+        if (apiKey == null || apiKey.isEmpty) return;
+      }
     }
     if (!mounted) return;
     Navigator.of(context).push(MaterialPageRoute(
