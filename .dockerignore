@@ -1,0 +1,20 @@
+# The web bundle and proxy binary are built fresh inside the image.
+build/
+.dart_tool/
+.git/
+.github/
+
+# Native platforms aren't needed for the web build.
+android/
+ios/
+macos/
+windows/
+linux/
+
+# Never bake secrets or local junk into the image.
+secrets/
+*.key
+.idea/
+*.iml
+.DS_Store
+test/
