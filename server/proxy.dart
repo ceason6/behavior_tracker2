@@ -21,11 +21,16 @@ import 'dart:io';
 ///                         is as simple as overwriting this file — no restart
 ///                         needed (hot reload). Takes precedence over
 ///                         ANTHROPIC_API_KEY when the file exists and is non-empty.
+///   APP_PASSWORD          optional staff password. When set, every request must
+///                         pass HTTP Basic auth (browser shows a login prompt);
+///                         any username, password must match. When unset, the app
+///                         is open. The /healthz probe is always exempt.
 Future<void> main() async {
   final port = int.tryParse(Platform.environment['PORT'] ?? '') ?? 8787;
   final webDir = Platform.environment['WEB_DIR'] ?? 'build/web';
   final envKey = Platform.environment['ANTHROPIC_API_KEY'];
   final keyFile = Platform.environment['ANTHROPIC_API_KEY_FILE'];
+  final appPassword = Platform.environment['APP_PASSWORD'];
 
   final server = await HttpServer.bind(InternetAddress.anyIPv4, port);
   stdout.writeln('ABC Behavior Tracker proxy listening on http://localhost:$port');
@@ -35,12 +40,36 @@ Future<void> main() async {
   } else if (envKey != null && envKey.isNotEmpty) {
     stdout.writeln('Server-side key: using ANTHROPIC_API_KEY for unauthenticated requests.');
   }
+  if (appPassword != null && appPassword.isNotEmpty) {
+    stdout.writeln('Access gate: ON (APP_PASSWORD set — Basic auth required).');
+  } else {
+    stdout.writeln('WARNING: APP_PASSWORD not set — the app is OPEN. Set APP_PASSWORD to require a login.');
+  }
 
   await for (final req in server) {
     try {
       _setCors(req.response);
       if (req.method == 'OPTIONS') {
         req.response.statusCode = HttpStatus.noContent;
+        await req.response.close();
+        continue;
+      }
+      // Unauthenticated health probe (so the access gate doesn't break Render's
+      // health check).
+      if (req.uri.path == '/healthz') {
+        req.response.statusCode = HttpStatus.ok;
+        req.response.write('ok');
+        await req.response.close();
+        continue;
+      }
+      // Password gate (Basic auth) — applies to the app and the proxy alike.
+      if (!_authorized(req, appPassword)) {
+        req.response.statusCode = HttpStatus.unauthorized;
+        req.response.headers.set(
+          'WWW-Authenticate',
+          'Basic realm="ABC Behavior Tracker", charset="UTF-8"',
+        );
+        req.response.write('Authentication required.');
         await req.response.close();
         continue;
       }
@@ -56,6 +85,35 @@ Future<void> main() async {
       await req.response.close();
     }
   }
+}
+
+/// True if the request may proceed. When [password] is unset the gate is off.
+/// Otherwise the request must carry HTTP Basic credentials whose password
+/// matches (the username is ignored).
+bool _authorized(HttpRequest req, String? password) {
+  if (password == null || password.isEmpty) return true;
+  final header = req.headers.value('authorization');
+  if (header == null || !header.toLowerCase().startsWith('basic ')) return false;
+  String decoded;
+  try {
+    decoded = utf8.decode(base64.decode(header.substring(6).trim()));
+  } catch (_) {
+    return false;
+  }
+  final sep = decoded.indexOf(':');
+  final supplied = sep >= 0 ? decoded.substring(sep + 1) : decoded;
+  return _constantTimeEquals(supplied, password);
+}
+
+/// Length-independent? No — but content-comparison is constant time for equal
+/// lengths, which is enough to avoid leaking the password byte-by-byte.
+bool _constantTimeEquals(String a, String b) {
+  if (a.length != b.length) return false;
+  var diff = 0;
+  for (var i = 0; i < a.length; i++) {
+    diff |= a.codeUnitAt(i) ^ b.codeUnitAt(i);
+  }
+  return diff == 0;
 }
 
 /// Resolves the server-side key fresh per request: the key file (if set and

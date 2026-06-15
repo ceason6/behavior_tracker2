@@ -35,7 +35,25 @@ browser — there is no database to run.
   key in the Anthropic Console and disable the old one with
   `server/rotate-key.sh disable <api_key_id>` (needs an Admin key + org account).
 
-## 2. Put Cloudflare in front (HTTPS + WAF + staff-only SSO)
+## 2a. Lock it with a staff password (built-in, no domain needed)
+
+The proxy has a built-in password gate. Set one env var and the whole app
+(and the AI proxy) requires a login:
+
+- Render → Service → **Environment** → add **`APP_PASSWORD`** = a staff password.
+  (`render.yaml` already declares it as a `sync:false` secret, so the dashboard
+  just prompts for the value.)
+
+When set, the browser shows a **Sign in** prompt on first load — enter **any
+username** and the password. The `/healthz` probe stays open so Render's health
+check keeps working. Leave `APP_PASSWORD` unset only for local testing; the
+proxy logs a warning when it's open.
+
+To change/rotate the password: update `APP_PASSWORD` in the dashboard (Render
+redeploys). This is one shared password — for per-person sign-in, use the
+Cloudflare SSO option below instead.
+
+## 2b. (Optional, stronger) Put Cloudflare in front (HTTPS + WAF + staff-only SSO)
 
 Requires a domain you manage on Cloudflare (e.g. `tracker.yourschool.org`).
 

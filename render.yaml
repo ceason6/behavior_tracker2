@@ -14,8 +14,11 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     plan: free            # upgrade to "starter" to avoid free-tier cold starts
-    healthCheckPath: /
+    healthCheckPath: /healthz   # unauthenticated probe (the app itself is gated)
     autoDeploy: true
     envVars:
       - key: ANTHROPIC_API_KEY_FILE
         value: /etc/secrets/anthropic.key
+      # Staff password gate. Set the value in the Render dashboard (it's a secret).
+      - key: APP_PASSWORD
+        sync: false
