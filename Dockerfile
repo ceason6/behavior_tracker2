@@ -5,9 +5,7 @@
 # web app AND forwards AI calls to Anthropic. See server/DEPLOY.md.
 
 # ---- Stage 1: build the Flutter web app + compile the proxy ----
-# Pinned: needs Dart >= 3.12.1 (the project's SDK constraint); :stable lagged at
-# 3.12.0. Bump this tag when you upgrade the Flutter SDK.
-FROM ghcr.io/cirruslabs/flutter:3.44.2 AS build
+FROM ghcr.io/cirruslabs/flutter:stable AS build
 # Avoid git "dubious ownership" errors when building as root.
 RUN git config --global --add safe.directory '*'
 WORKDIR /app
