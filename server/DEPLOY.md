@@ -19,11 +19,10 @@ browser — there is no database to run.
    and creates the `abc-behavior-tracker` Docker web service.
    - (Or **New → Web Service → Docker** and point it at this repo if you prefer
      not to use the blueprint.)
-3. Add the API key — **Service → Environment → Secret Files → Add Secret File**:
-   - **Filename:** `anthropic.key`
-   - **Contents:** your `sk-ant-...` key (no quotes, no trailing newline)
-   - It mounts at `/etc/secrets/anthropic.key`, which `ANTHROPIC_API_KEY_FILE`
-     already points to. (Prefer this over an env var so the key lives in a file.)
+3. Add the API key — **Service → Environment → Environment Variables**:
+   - Set **`ANTHROPIC_API_KEY`** to your `sk-ant-...` key (no quotes, no trailing
+     newline). The proxy always uses this server-side key, so the key stays on
+     the server and never reaches the browser.
 4. Deploy. You get a URL like `https://abc-behavior-tracker.onrender.com`.
    Open it — the web app loads and the AI features use the server-side key (users
    don't enter their own).
@@ -31,8 +30,11 @@ browser — there is no database to run.
 **Notes**
 - The free plan cold-starts after idle; upgrade to `starter` for always-on.
 - `PORT` is injected by Render; the proxy honors it automatically.
-- To rotate the key: update the Secret File (Render redeploys), or create a new
-  key in the Anthropic Console and disable the old one with
+- The startup log prints the last 4 characters of the loaded key
+  (`Server-side key: using ANTHROPIC_API_KEY (ends ...XXXX).`) so you can confirm
+  which key is live without exposing it.
+- To rotate the key: create a new key in the Anthropic Console, paste it into the
+  `ANTHROPIC_API_KEY` env var (Render redeploys), then disable the old one with
   `server/rotate-key.sh disable <api_key_id>` (needs an Admin key + org account).
 
 ## 2a. Lock it with a staff password (built-in, no domain needed)
@@ -78,14 +80,14 @@ staff-gated, and the Anthropic key never leaves the server.
 
 - **Fly.io:** `fly launch` (uses the Dockerfile), `fly secrets set` for the key,
   then the same Cloudflare steps. Tiny always-on VMs.
-- **Google Cloud Run:** deploy the Dockerfile, mount the key from **Secret
-  Manager as a file** at `/etc/secrets/anthropic.key` (matches
-  `ANTHROPIC_API_KEY_FILE`), and gate with **IAP** or Cloudflare.
+- **Google Cloud Run:** deploy the Dockerfile, expose the key from **Secret
+  Manager as the `ANTHROPIC_API_KEY` environment variable**, and gate with
+  **IAP** or Cloudflare.
 
 ## 4. Local run (no Docker)
 
 ```bash
 flutter build web
-ANTHROPIC_API_KEY_FILE=secrets/anthropic.key dart run server/proxy.dart
-# http://localhost:8787
+ANTHROPIC_API_KEY=sk-ant-... APP_PASSWORD=choose-a-password dart run server/proxy.dart
+# http://localhost:8787  (leave APP_PASSWORD unset to run open for local testing)
 ```

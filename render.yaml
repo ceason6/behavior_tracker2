@@ -1,13 +1,12 @@
 # Render Blueprint — deploys the ABC Behavior Tracker (web app + Anthropic proxy)
 # as a single Docker web service. See server/DEPLOY.md for the full walkthrough.
 #
-# After the first deploy, add your Anthropic key in the Render dashboard:
-#   Service → Environment → Secret Files → add a file named "anthropic.key"
-#   whose contents are your sk-ant-... key. It mounts at /etc/secrets/anthropic.key,
-#   which ANTHROPIC_API_KEY_FILE already points to.
-#
-# (Alternative: instead of a secret file, set an ANTHROPIC_API_KEY env var with
-#  sync:false and remove the ANTHROPIC_API_KEY_FILE line below.)
+# After the first deploy, set both secret values in the Render dashboard
+# (Service → Environment → Environment Variables), since both are declared
+# sync:false below and so are left blank by the blueprint:
+#   ANTHROPIC_API_KEY  your sk-ant-... key (the proxy always uses this key)
+#   APP_PASSWORD       the staff login password for the app's Basic-auth gate
+# Paste each value with no surrounding quotes and no trailing newline.
 services:
   - type: web
     name: abc-behavior-tracker

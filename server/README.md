@@ -17,34 +17,29 @@ dart run server/proxy.dart
 
 Because the app and the proxy are served from the same origin, the web build
 calls `/v1/messages` and the proxy forwards it to Anthropic — no CORS, and the
-API key never has to be hard-coded into the site.
+API key never reaches the browser.
 
 ## Where the API key comes from
 
-- **Per-user (default):** each user enters their own key via the 🔑 / ⚙ settings;
-  the app sends it as `x-api-key` and the proxy forwards it.
-- **Server-side (optional):** set `ANTHROPIC_API_KEY` in the proxy's environment.
-  The proxy then uses it for any request that arrives without an `x-api-key`
-  header, so the key stays on the server and never reaches the browser.
+The proxy always uses the **server-side** `ANTHROPIC_API_KEY` from its
+environment, so the key stays on the server and the browser never holds it. A
+client-supplied `x-api-key` is honored only as a fallback when no server key is
+configured (e.g. plain local dev) — a stale browser-cached key can never override
+the server key.
 
 ```bash
 ANTHROPIC_API_KEY=sk-ant-... dart run server/proxy.dart
 ```
 
-## Hot-reloadable key file (zero-downtime rotation)
+## Staff password gate
 
-Instead of a static `ANTHROPIC_API_KEY` env var, point the proxy at a **file**:
-
-```bash
-ANTHROPIC_API_KEY_FILE=./secrets/anthropic.key dart run server/proxy.dart
-```
-
-The proxy reads this file **fresh on every request**, so rotating the key is just
-overwriting the file — no restart. Use the helper script:
+Set `APP_PASSWORD` to require a login on the whole app (and the proxy). The
+browser shows a Basic-auth prompt; enter any username and the password. The
+`/healthz` probe stays open. Leave it unset only for local testing — the proxy
+logs a warning when the app is open.
 
 ```bash
-# install a new key (created in the Console) — takes effect on the next request
-ANTHROPIC_API_KEY_FILE=./secrets/anthropic.key ./server/rotate-key.sh set sk-ant-NEWKEY
+ANTHROPIC_API_KEY=sk-ant-... APP_PASSWORD=choose-a-password dart run server/proxy.dart
 ```
 
 ## Rotating keys (server/rotate-key.sh)
@@ -52,27 +47,30 @@ ANTHROPIC_API_KEY_FILE=./secrets/anthropic.key ./server/rotate-key.sh set sk-ant
 Anthropic's Admin API **cannot create** keys (Console-only), so create the new key
 in the Console first, then:
 
+1. Create a new key in the Console (in the workspace that holds your credits).
+2. Paste it into the proxy's `ANTHROPIC_API_KEY` (on Render: Environment →
+   Environment Variables → save → it redeploys).
+3. Disable the old key:
+
 ```bash
-export ANTHROPIC_API_KEY_FILE=./secrets/anthropic.key
-export ANTHROPIC_ADMIN_KEY=sk-ant-admin-...     # org accounts only; for list/disable
+export ANTHROPIC_ADMIN_KEY=sk-ant-admin-...     # org accounts only
 
 ./server/rotate-key.sh list                      # find the OLD key's id (apikey_...)
-./server/rotate-key.sh rotate sk-ant-NEWKEY apikey_OLDID   # install new + disable old
+./server/rotate-key.sh disable apikey_OLDID      # deactivate it
 ```
 
-Other subcommands: `set <new-key>`, `disable <api_key_id>`. The `list`/`disable`
-commands require an **Admin API key** (`sk-ant-admin...`) and an **organization**
-account (the Admin API is unavailable on individual accounts). The secret file is
-written `0600`, and `secrets/` / `*.key` are git-ignored.
+The `list`/`disable` commands require an **Admin API key** (`sk-ant-admin...`)
+and an **organization** account (the Admin API is unavailable on individual
+accounts).
 
 ## Environment variables
 
-| Variable                 | Default     | Purpose                                            |
-| ------------------------ | ----------- | -------------------------------------------------- |
-| `PORT`                   | `8787`      | Port to listen on                                  |
-| `WEB_DIR`                | `build/web` | Directory of the built Flutter web app             |
-| `ANTHROPIC_API_KEY`      | _(unset)_   | Optional server-side fallback key                  |
-| `ANTHROPIC_API_KEY_FILE` | _(unset)_   | Path to a key file, re-read per request (hot reload); takes precedence over `ANTHROPIC_API_KEY` |
+| Variable            | Default     | Purpose                                                              |
+| ------------------- | ----------- | ------------------------------------------------------------------- |
+| `PORT`              | `8787`      | Port to listen on (Render injects this)                             |
+| `WEB_DIR`           | `build/web` | Directory of the built Flutter web app                             |
+| `ANTHROPIC_API_KEY` | _(unset)_   | Server-side Anthropic key the proxy always uses for AI requests     |
+| `APP_PASSWORD`      | _(unset)_   | Staff login password; when set, Basic auth is required (app is open if unset) |
 
 ## Using a separately-hosted proxy
 

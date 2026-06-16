@@ -14,9 +14,10 @@ import 'dart:io';
 /// Environment variables:
 ///   PORT                port to listen on (default 8787)
 ///   WEB_DIR             directory of the built web app (default build/web)
-///   ANTHROPIC_API_KEY   server-side key; used when the client request does not
-///                       include an x-api-key header. This is the single source
-///                       of the server-side key.
+///   ANTHROPIC_API_KEY   server-side key. When set, the proxy ALWAYS uses it and
+///                       ignores any client x-api-key, so a stale browser-cached
+///                       key can't override it. A client x-api-key is used only as
+///                       a fallback when this is unset (e.g. local dev).
 ///   APP_PASSWORD        optional staff password. When set, every request must
 ///                       pass HTTP Basic auth (browser shows a login prompt);
 ///                       any username, password must match. When unset, the app

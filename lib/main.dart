@@ -233,6 +233,12 @@ class ABCLoggingScreen extends StatefulWidget {
 class _ABCLoggingScreenState extends State<ABCLoggingScreen> {
   final _formKey = GlobalKey<FormState>();
 
+  // Bumped on every reset so the dropdown form fields are rebuilt from scratch.
+  // DropdownButtonFormField only honors `initialValue` when it is first created
+  // (or on FormState.reset(), which fires before we null the selections), so a
+  // changing key is what actually clears the dropdowns after a save.
+  int _formResetKey = 0;
+
   String? selectedStudent;
   String? selectedPeriod;
   String? selectedAntecedent;
@@ -610,6 +616,7 @@ ${buffer.toString()}''';
   void _resetForm() {
     _formKey.currentState?.reset();
     setState(() {
+      _formResetKey++;
       selectedStudent = null;
       selectedPeriod = null;
       selectedAntecedent = null;
@@ -687,6 +694,7 @@ ${buffer.toString()}''';
             children: [
               Text("Student", style: sectionHeadingStyle),
               DropdownButtonFormField<String>(
+                key: ValueKey('student-$_formResetKey'),
                 initialValue: selectedStudent,
                 hint: const Text("Select Student"),
                 items: students.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
@@ -729,6 +737,7 @@ ${buffer.toString()}''';
 
               Text("School Period", style: sectionHeadingStyle),
               DropdownButtonFormField<String>(
+                key: ValueKey('period-$_formResetKey'),
                 initialValue: selectedPeriod,
                 hint: const Text("Select Period"),
                 items: periods.map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
@@ -739,6 +748,7 @@ ${buffer.toString()}''';
 
               Text("Antecedent", style: sectionHeadingStyle),
               DropdownButtonFormField<String>(
+                key: ValueKey('antecedent-$_formResetKey'),
                 initialValue: selectedAntecedent,
                 hint: const Text("What happened before?"),
                 items: antecedents.map((a) => DropdownMenuItem(value: a, child: Text(a))).toList(),
@@ -766,6 +776,7 @@ ${buffer.toString()}''';
 
               Text("Behavior", style: sectionHeadingStyle),
               DropdownButtonFormField<String>(
+                key: ValueKey('behavior-$_formResetKey'),
                 initialValue: selectedBehavior,
                 hint: const Text("What did the student do?"),
                 items: behaviors.map((b) => DropdownMenuItem(value: b, child: Text(b))).toList(),
@@ -794,6 +805,7 @@ ${buffer.toString()}''';
 
               Text("Consequence", style: sectionHeadingStyle),
               DropdownButtonFormField<String>(
+                key: ValueKey('consequence-$_formResetKey'),
                 initialValue: selectedConsequence,
                 hint: const Text("What happened after?"),
                 items: consequences.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
@@ -821,6 +833,7 @@ ${buffer.toString()}''';
 
               Text("Proactive Strategies", style: sectionHeadingStyle),
               DropdownButtonFormField<String>(
+                key: ValueKey('proactive-$_formResetKey'),
                 initialValue: selectedProactiveStrategy,
                 isExpanded: true,
                 hint: const Text("Select a proactive strategy"),
@@ -832,6 +845,7 @@ ${buffer.toString()}''';
               const SizedBox(height: 24),
               Text("Logged by", style: sectionHeadingStyle),
               DropdownButtonFormField<String>(
+                key: ValueKey('staff-$_formResetKey'),
                 initialValue: selectedStaff,
                 hint: const Text("Select Staff"),
                 items: staffMembers.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
