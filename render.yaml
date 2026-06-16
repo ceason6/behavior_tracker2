@@ -17,8 +17,9 @@ services:
     healthCheckPath: /healthz   # unauthenticated probe (the app itself is gated)
     autoDeploy: true
     envVars:
-      - key: ANTHROPIC_API_KEY_FILE
-        value: /etc/secrets/anthropic.key
+      # Server-side Anthropic key. Set the value in the Render dashboard (secret).
+      - key: ANTHROPIC_API_KEY
+        sync: false
       # Staff password gate. Set the value in the Render dashboard (it's a secret).
       - key: APP_PASSWORD
         sync: false
