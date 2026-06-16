@@ -158,8 +158,14 @@ Future<void> _proxyMessages(HttpRequest req, String serverKey) async {
         resp.headers.contentType ?? ContentType('application', 'json', charset: 'utf-8');
     req.response.headers.set('Cache-Control', 'no-cache');
     req.response.headers.set('X-Accel-Buffering', 'no');
-    // Pipe the upstream bytes straight through (no decode/re-encode round-trip).
-    await req.response.addStream(resp);
+    // Forward each chunk and flush immediately. addStream() lets dart:io buffer
+    // the whole response, which defeats streaming (the client would see one
+    // burst at the end and an idle connection until then). Flushing per chunk
+    // pushes each SSE event out as it arrives, keeping the connection active.
+    await for (final chunk in resp) {
+      req.response.add(chunk);
+      await req.response.flush();
+    }
     await req.response.close();
   } finally {
     client.close();
