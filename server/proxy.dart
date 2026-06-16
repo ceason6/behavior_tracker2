@@ -120,8 +120,10 @@ void _setCors(HttpResponse res) {
 
 Future<void> _proxyMessages(HttpRequest req, String serverKey) async {
   final body = await utf8.decoder.bind(req).join();
-  // Client-supplied key wins; otherwise use the server-side ANTHROPIC_API_KEY.
-  final apiKey = req.headers.value('x-api-key') ?? (serverKey.isNotEmpty ? serverKey : null);
+  // The server-side key always wins when set, so a stale browser-cached
+  // x-api-key can never override it. Fall back to a client key only when no
+  // server key is configured (e.g. local dev).
+  final apiKey = serverKey.isNotEmpty ? serverKey : req.headers.value('x-api-key');
   final version = req.headers.value('anthropic-version') ?? '2023-06-01';
 
   final client = HttpClient();
