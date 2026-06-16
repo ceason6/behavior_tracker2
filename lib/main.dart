@@ -116,6 +116,12 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// - On web (no override), calls the same-origin `/v1/messages` so a co-hosted
 ///   proxy (see server/proxy.dart) handles the request without CORS / key exposure.
 /// - On mobile/desktop, calls the Anthropic API directly.
+/// Bumped on each deploy so a loaded build is identifiable on-screen. If this
+/// tag does NOT appear in an error message, the browser is running a stale
+/// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
+/// the real underlying error.
+const String kBuildTag = 'diag-6';
+
 String _anthropicEndpoint() {
   const override = String.fromEnvironment('ANTHROPIC_PROXY');
   if (override.isNotEmpty) {
@@ -2017,13 +2023,14 @@ Be concise and practical, and base every statement on the provided data. If the 
       setState(() {
         _loading = false;
         _authError = _looksLikeAuthError('$e');
+        final detail = '\n\n[diag $kBuildTag] $e';
         if (_authError) {
-          _error = 'Your Anthropic API key is missing or invalid.';
+          _error = 'Your Anthropic API key is missing or invalid.$detail';
         } else if (_looksLikeBillingError('$e')) {
           _error = 'Your Anthropic account is out of credits. Add credits at '
-              'console.anthropic.com (Plans & Billing), then retry.';
+              'console.anthropic.com (Plans & Billing), then retry.$detail';
         } else {
-          _error = '$e';
+          _error = '$e$detail';
         }
       });
     }
@@ -2066,7 +2073,7 @@ Be concise and practical, and base every statement on the provided data. If the 
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: Text('AI Analysis - ${widget.student}'),
+        title: Text('AI Analysis - ${widget.student}  ($kBuildTag)'),
         actions: [
           if (_result != null)
             IconButton(
