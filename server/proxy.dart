@@ -75,11 +75,23 @@ Future<void> main() async {
         continue;
       }
       await _serveStatic(req, webDir);
-    } catch (e) {
-      req.response.statusCode = HttpStatus.internalServerError;
-      req.response.headers.contentType = ContentType.json;
-      req.response.write(jsonEncode({'error': '$e'}));
-      await req.response.close();
+    } catch (e, st) {
+      // Log the full error + stack to the server console (Render logs) and return
+      // enough detail to diagnose from the client, too.
+      stderr.writeln('Request error on ${req.method} ${req.uri.path}: $e');
+      stderr.writeln(st);
+      try {
+        req.response.statusCode = HttpStatus.internalServerError;
+        req.response.headers.contentType = ContentType.json;
+        req.response.write(jsonEncode({
+          'error': '$e',
+          'errorType': e.runtimeType.toString(),
+          'where': st.toString().split('\n').take(4).join(' <- '),
+        }));
+        await req.response.close();
+      } catch (_) {
+        // Response may already be (partly) committed; nothing more we can do.
+      }
     }
   }
 }
