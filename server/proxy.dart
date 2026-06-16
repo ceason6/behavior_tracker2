@@ -151,6 +151,9 @@ Future<void> _proxyMessages(HttpRequest req, String serverKey) async {
     upstream.add(utf8.encode(body));
     final resp = await upstream.close();
     req.response.statusCode = resp.statusCode;
+    // Disable dart:io's output buffering so each flushed chunk goes out
+    // immediately rather than being aggregated.
+    req.response.bufferOutput = false;
     // Preserve the upstream content type (text/event-stream when streaming, else
     // JSON) and discourage any intermediary from buffering the stream, so bytes
     // reach the browser continuously and the connection never goes idle.
