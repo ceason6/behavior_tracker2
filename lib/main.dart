@@ -131,6 +131,38 @@ String _anthropicEndpoint() {
   return 'https://api.anthropic.com/v1/messages';
 }
 
+/// Cached Unicode-capable theme for the PDF report. The pdf package's built-in
+/// font only covers Latin-1, so emoji and non-Latin scripts (CJK, Arabic,
+/// Hebrew, Devanagari, Thai, …) would otherwise fail to render. We load Noto
+/// Sans as the base plus a fallback chain, fetched once per session and reused.
+Future<pw.ThemeData>? _pdfUnicodeThemeFuture;
+
+Future<pw.ThemeData> _pdfUnicodeTheme() {
+  return _pdfUnicodeThemeFuture ??= () async {
+    final base = await PdfGoogleFonts.notoSansRegular();
+    final bold = await PdfGoogleFonts.notoSansBold();
+    final italic = await PdfGoogleFonts.notoSansItalic();
+    final boldItalic = await PdfGoogleFonts.notoSansBoldItalic();
+    final fallback = await Future.wait([
+      PdfGoogleFonts.notoColorEmoji(),
+      PdfGoogleFonts.notoSansSCRegular(),
+      PdfGoogleFonts.notoSansJPRegular(),
+      PdfGoogleFonts.notoSansKRRegular(),
+      PdfGoogleFonts.notoSansArabicRegular(),
+      PdfGoogleFonts.notoSansHebrewRegular(),
+      PdfGoogleFonts.notoSansDevanagariRegular(),
+      PdfGoogleFonts.notoSansThaiRegular(),
+    ]);
+    return pw.ThemeData.withFont(
+      base: base,
+      bold: bold,
+      italic: italic,
+      boldItalic: boldItalic,
+      fontFallback: fallback,
+    );
+  }();
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const MyApp());
@@ -1172,7 +1204,17 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
 
   /// Builds a printable / downloadable PDF summary report for this student.
   Future<Uint8List> _buildReportPdf() async {
-    final doc = pw.Document();
+    // Use Unicode fonts so any symbol renders (emoji, CJK, Arabic, etc.). If the
+    // fonts can't be fetched (e.g. offline), fall back to the built-in font so
+    // plain reports still generate, and allow a retry next time.
+    pw.ThemeData? theme;
+    try {
+      theme = await _pdfUnicodeTheme();
+    } catch (_) {
+      _pdfUnicodeThemeFuture = null;
+      theme = null;
+    }
+    final doc = pw.Document(theme: theme);
 
     final overall = _buildOverallFrequency();
     final overallEntries = overall.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
