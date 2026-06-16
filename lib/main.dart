@@ -120,7 +120,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v8';
+const String kBuildTag = 'v9';
 
 String _anthropicEndpoint() {
   const override = String.fromEnvironment('ANTHROPIC_PROXY');
@@ -195,6 +195,10 @@ class AnthropicClient {
       'messages': [
         {'role': 'user', 'content': userPrompt},
       ],
+      // Stream the response. A long non-streaming request leaves the connection
+      // idle for tens of seconds, which mobile/edge networks drop ("Load
+      // failed"). Streaming keeps bytes flowing so the connection stays alive.
+      'stream': true,
       if (thinking) 'thinking': {'type': 'adaptive'},
     };
 
@@ -210,22 +214,61 @@ class AnthropicClient {
       body: jsonEncode(payload),
     );
 
-    if (response.statusCode == 200) {
-      final Map<String, dynamic> decoded = jsonDecode(response.body) as Map<String, dynamic>;
-      final content = decoded['content'] as List<dynamic>?;
-      if (content != null) {
-        // Response is a list of blocks; return the first text block (skipping
-        // any thinking blocks that precede it).
-        for (final block in content) {
-          if (block is Map && block['type'] == 'text') {
-            return (block['text'] as String?)?.trim();
-          }
-        }
-      }
-      return null;
-    } else {
+    if (response.statusCode != 200) {
       throw Exception('Anthropic API error: ${response.statusCode} ${response.body}');
     }
+
+    // The body is UTF-8; decode from bytes (don't trust the content-type charset).
+    final body = utf8.decode(response.bodyBytes);
+    // Streaming responses are Server-Sent Events; a non-streaming response is a
+    // single JSON object. Handle both so we work either way.
+    if (body.contains('event:') || body.contains('data:')) {
+      return _extractTextFromSse(body);
+    }
+    return _extractTextFromJson(body);
+  }
+
+  /// Pulls the assistant text out of a non-streaming Messages response.
+  static String? _extractTextFromJson(String body) {
+    final decoded = jsonDecode(body) as Map<String, dynamic>;
+    final content = decoded['content'] as List<dynamic>?;
+    if (content != null) {
+      // Return the first text block (skipping any thinking blocks before it).
+      for (final block in content) {
+        if (block is Map && block['type'] == 'text') {
+          return (block['text'] as String?)?.trim();
+        }
+      }
+    }
+    return null;
+  }
+
+  /// Concatenates the text deltas from a streamed (SSE) Messages response,
+  /// ignoring thinking deltas. Throws on a mid-stream error event.
+  static String? _extractTextFromSse(String body) {
+    final buf = StringBuffer();
+    for (final line in const LineSplitter().convert(body)) {
+      if (!line.startsWith('data:')) continue;
+      final data = line.substring(5).trim();
+      if (data.isEmpty || data == '[DONE]') continue;
+      Map<String, dynamic> obj;
+      try {
+        obj = jsonDecode(data) as Map<String, dynamic>;
+      } catch (_) {
+        continue;
+      }
+      final type = obj['type'];
+      if (type == 'content_block_delta') {
+        final delta = obj['delta'];
+        if (delta is Map && delta['type'] == 'text_delta') {
+          buf.write(delta['text'] ?? '');
+        }
+      } else if (type == 'error') {
+        throw Exception('Anthropic API error: ${jsonEncode(obj['error'])}');
+      }
+    }
+    final text = buf.toString().trim();
+    return text.isEmpty ? null : text;
   }
 
   /// Rewrites a single incident's notes into a concise clinical description.

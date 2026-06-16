@@ -151,7 +151,13 @@ Future<void> _proxyMessages(HttpRequest req, String serverKey) async {
     upstream.add(utf8.encode(body));
     final resp = await upstream.close();
     req.response.statusCode = resp.statusCode;
-    req.response.headers.contentType = ContentType('application', 'json', charset: 'utf-8');
+    // Preserve the upstream content type (text/event-stream when streaming, else
+    // JSON) and discourage any intermediary from buffering the stream, so bytes
+    // reach the browser continuously and the connection never goes idle.
+    req.response.headers.contentType =
+        resp.headers.contentType ?? ContentType('application', 'json', charset: 'utf-8');
+    req.response.headers.set('Cache-Control', 'no-cache');
+    req.response.headers.set('X-Accel-Buffering', 'no');
     // Pipe the upstream bytes straight through (no decode/re-encode round-trip).
     await req.response.addStream(resp);
     await req.response.close();
