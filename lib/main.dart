@@ -391,7 +391,7 @@ ${buffer.toString()}''';
           msg.contains('invalid_api_key') ||
           msg.contains('incorrect api key') ||
           msg.contains('invalid authentication');
-      final isBilling = msg.contains('credit balance') || msg.contains('billing') || msg.contains('insufficient');
+      final isBilling = msg.contains('credit balance') || msg.contains('plans & billing');
       if (isAuth) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Invalid Anthropic API key — please update it.')),
@@ -1984,7 +1984,9 @@ Be concise and practical, and base every statement on the provided data. If the 
 
   bool _looksLikeBillingError(String message) {
     final m = message.toLowerCase();
-    return m.contains('credit balance') || m.contains('billing') || m.contains('insufficient');
+    // Match only Anthropic's genuine low-balance message; avoid broad words like
+    // "insufficient" that also appear in unrelated errors (and in AI output).
+    return m.contains('credit balance') || m.contains('plans & billing');
   }
 
   Future<void> _run() async {
@@ -2023,7 +2025,7 @@ Be concise and practical, and base every statement on the provided data. If the 
       setState(() {
         _loading = false;
         _authError = _looksLikeAuthError('$e');
-        final detail = '\n\n[diag $kBuildTag] $e';
+        final detail = '\n\n($kBuildTag) $e';
         if (_authError) {
           _error = 'Your Anthropic API key is missing or invalid.$detail';
         } else if (_looksLikeBillingError('$e')) {
@@ -2073,7 +2075,7 @@ Be concise and practical, and base every statement on the provided data. If the 
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: Text('AI Analysis - ${widget.student}  ($kBuildTag)'),
+        title: Text('AI Analysis - ${widget.student}'),
         actions: [
           if (_result != null)
             IconButton(
