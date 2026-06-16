@@ -132,9 +132,12 @@ String _anthropicEndpoint() {
 }
 
 /// Cached Unicode-capable theme for the PDF report. The pdf package's built-in
-/// font only covers Latin-1, so emoji and non-Latin scripts (CJK, Arabic,
-/// Hebrew, Devanagari, Thai, …) would otherwise fail to render. We load Noto
-/// Sans as the base plus a fallback chain, fetched once per session and reused.
+/// font only covers Latin-1, so even curly quotes, dashes and accents fail to
+/// render. Noto Sans (base) handles all normal typography — Latin, Greek,
+/// Cyrillic, punctuation, currency, symbols — and a monochrome emoji fallback
+/// covers emoji cheaply (~1.5 MB total, fetched once per session). Non-Latin
+/// scripts (CJK, Arabic, Hebrew, …) are intentionally not bundled to keep the
+/// download light; they'd simply be omitted from the PDF, never crash it.
 Future<pw.ThemeData>? _pdfUnicodeThemeFuture;
 
 Future<pw.ThemeData> _pdfUnicodeTheme() {
@@ -143,22 +146,13 @@ Future<pw.ThemeData> _pdfUnicodeTheme() {
     final bold = await PdfGoogleFonts.notoSansBold();
     final italic = await PdfGoogleFonts.notoSansItalic();
     final boldItalic = await PdfGoogleFonts.notoSansBoldItalic();
-    final fallback = await Future.wait([
-      PdfGoogleFonts.notoColorEmoji(),
-      PdfGoogleFonts.notoSansSCRegular(),
-      PdfGoogleFonts.notoSansJPRegular(),
-      PdfGoogleFonts.notoSansKRRegular(),
-      PdfGoogleFonts.notoSansArabicRegular(),
-      PdfGoogleFonts.notoSansHebrewRegular(),
-      PdfGoogleFonts.notoSansDevanagariRegular(),
-      PdfGoogleFonts.notoSansThaiRegular(),
-    ]);
+    final emoji = await PdfGoogleFonts.notoEmojiRegular();
     return pw.ThemeData.withFont(
       base: base,
       bold: bold,
       italic: italic,
       boldItalic: boldItalic,
-      fontFallback: fallback,
+      fontFallback: [emoji],
     );
   }();
 }
