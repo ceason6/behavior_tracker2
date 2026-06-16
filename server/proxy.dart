@@ -82,12 +82,12 @@ Future<void> main() async {
       stderr.writeln(st);
       try {
         req.response.statusCode = HttpStatus.internalServerError;
-        req.response.headers.contentType = ContentType.json;
-        req.response.write(jsonEncode({
+        req.response.headers.contentType = ContentType('application', 'json', charset: 'utf-8');
+        req.response.add(utf8.encode(jsonEncode({
           'error': '$e',
           'errorType': e.runtimeType.toString(),
           'where': st.toString().split('\n').take(4).join(' <- '),
-        }));
+        })));
         await req.response.close();
       } catch (_) {
         // Response may already be (partly) committed; nothing more we can do.
@@ -142,15 +142,18 @@ Future<void> _proxyMessages(HttpRequest req, String serverKey) async {
   final client = HttpClient();
   try {
     final upstream = await client.postUrl(Uri.parse('https://api.anthropic.com/v1/messages'));
-    upstream.headers.set('Content-Type', 'application/json');
+    upstream.headers.set('Content-Type', 'application/json; charset=utf-8');
     upstream.headers.set('anthropic-version', version);
     if (apiKey != null) upstream.headers.set('x-api-key', apiKey);
-    upstream.write(body);
+    // Write UTF-8 bytes, not a String: IOSink.write defaults to Latin-1, which
+    // throws on any character above code point 255 (e.g. curly quotes/emoji that
+    // iOS smart punctuation inserts). Encoding to UTF-8 bytes handles all input.
+    upstream.add(utf8.encode(body));
     final resp = await upstream.close();
-    final respBody = await utf8.decoder.bind(resp).join();
     req.response.statusCode = resp.statusCode;
-    req.response.headers.contentType = ContentType.json;
-    req.response.write(respBody);
+    req.response.headers.contentType = ContentType('application', 'json', charset: 'utf-8');
+    // Pipe the upstream bytes straight through (no decode/re-encode round-trip).
+    await req.response.addStream(resp);
     await req.response.close();
   } finally {
     client.close();
