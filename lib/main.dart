@@ -120,7 +120,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v9';
+const String kBuildTag = 'v10';
 
 String _anthropicEndpoint() {
   const override = String.fromEnvironment('ANTHROPIC_PROXY');
@@ -202,30 +202,52 @@ class AnthropicClient {
       if (thinking) 'thinking': {'type': 'adaptive'},
     };
 
-    final response = await http.post(
-      uri,
-      headers: {
-        'content-type': 'application/json',
-        'anthropic-version': '2023-06-01',
-        // Only send a key if we have one. When empty (web), the same-origin
-        // proxy injects the server-side key instead.
-        if (apiKey.isNotEmpty) 'x-api-key': apiKey,
-      },
-      body: jsonEncode(payload),
-    );
+    final headers = {
+      'content-type': 'application/json',
+      'anthropic-version': '2023-06-01',
+      // Only send a key if we have one. When empty (web), the same-origin
+      // proxy injects the server-side key instead.
+      if (apiKey.isNotEmpty) 'x-api-key': apiKey,
+    };
+    final bodyJson = jsonEncode(payload);
 
-    if (response.statusCode != 200) {
-      throw Exception('Anthropic API error: ${response.statusCode} ${response.body}');
+    // Anthropic occasionally returns a transient "Internal server error"
+    // (api_error), more often on long requests with thinking. The official SDKs
+    // retry these automatically; we do the same. Non-transient errors (auth,
+    // billing, bad request) are thrown immediately.
+    const maxAttempts = 4;
+    for (var attempt = 1;; attempt++) {
+      try {
+        final response = await http.post(uri, headers: headers, body: bodyJson);
+        if (response.statusCode != 200) {
+          throw Exception('Anthropic API error: ${response.statusCode} ${response.body}');
+        }
+        // The body is UTF-8; decode from bytes (don't trust the content-type charset).
+        final body = utf8.decode(response.bodyBytes);
+        // Streaming responses are Server-Sent Events; a non-streaming response
+        // is a single JSON object. Handle both so we work either way.
+        if (body.contains('event:') || body.contains('data:')) {
+          return _extractTextFromSse(body);
+        }
+        return _extractTextFromJson(body);
+      } catch (e) {
+        if (attempt >= maxAttempts || !_isTransientError('$e')) rethrow;
+        await Future<void>.delayed(Duration(milliseconds: 700 * attempt));
+      }
     }
+  }
 
-    // The body is UTF-8; decode from bytes (don't trust the content-type charset).
-    final body = utf8.decode(response.bodyBytes);
-    // Streaming responses are Server-Sent Events; a non-streaming response is a
-    // single JSON object. Handle both so we work either way.
-    if (body.contains('event:') || body.contains('data:')) {
-      return _extractTextFromSse(body);
-    }
-    return _extractTextFromJson(body);
+  /// Transient, retryable failures: Anthropic 5xx / overloaded / internal
+  /// server errors. Excludes auth (401), billing, and bad-request (400) errors.
+  static bool _isTransientError(String error) {
+    final m = error.toLowerCase();
+    return m.contains('internal server error') ||
+        m.contains('overloaded') ||
+        m.contains('api_error') ||
+        m.contains('error: 500') ||
+        m.contains('error: 502') ||
+        m.contains('error: 503') ||
+        m.contains('error: 529');
   }
 
   /// Pulls the assistant text out of a non-streaming Messages response.
