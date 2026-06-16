@@ -159,6 +159,13 @@ Future<void> _serveStatic(HttpRequest req, String webDir) async {
     await req.response.close();
     return;
   }
+  // Never let the browser pin the app shell or the service worker, or a new
+  // deploy won't reach users until they manually clear their cache. Forcing
+  // revalidation on these two files lets the service worker pick up new builds.
+  final fileName = path.substring(path.lastIndexOf('/') + 1);
+  if (fileName.isEmpty || fileName == 'index.html' || fileName == 'flutter_service_worker.js') {
+    req.response.headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+  }
   final ext = path.contains('.') ? path.substring(path.lastIndexOf('.')) : '';
   req.response.headers.contentType = _contentTypeFor(ext);
   await req.response.addStream(file.openRead());
