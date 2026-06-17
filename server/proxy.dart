@@ -95,17 +95,17 @@ Future<void> main() async {
       }
       await _serveStatic(req, webDir);
     } catch (e, st) {
-      // Log the full error + stack to the server console (Render logs) and return
-      // enough detail to diagnose from the client, too.
-      stderr.writeln('Request error on ${req.method} ${req.uri.path}: $e');
+      // FERPA: never log or return the exception message or request body — they
+      // can contain student data. Log only the error TYPE, path, and stack
+      // frames (code locations, no data), and return a generic error.
+      stderr.writeln('Request error on ${req.method} ${req.uri.path}: ${e.runtimeType}');
       stderr.writeln(st);
       try {
         req.response.statusCode = HttpStatus.internalServerError;
         req.response.headers.contentType = ContentType('application', 'json', charset: 'utf-8');
         req.response.add(utf8.encode(jsonEncode({
-          'error': '$e',
+          'error': 'Internal server error',
           'errorType': e.runtimeType.toString(),
-          'where': st.toString().split('\n').take(4).join(' <- '),
         })));
         await req.response.close();
       } catch (_) {
