@@ -16,6 +16,8 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:fl_chart/fl_chart.dart';
 
+import 'io_download.dart' if (dart.library.html) 'web_download.dart';
+
 /// Two-digit zero-padded string for clock/date components.
 String _two(int value) => value.toString().padLeft(2, '0');
 
@@ -122,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v11';
+const String kBuildTag = 'v12';
 
 String _anthropicEndpoint() {
   const override = String.fromEnvironment('ANTHROPIC_PROXY');
@@ -659,6 +661,57 @@ ${buffer.toString()}''';
     }
   }
 
+  /// Pulls the latest shared data, then downloads all entries as a CSV file.
+  Future<void> _exportData() async {
+    await _syncFromServer();
+    final logs = _sortedLogs();
+    if (logs.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No data to export yet.')),
+      );
+      return;
+    }
+    final csv = _logsToCsv(logs);
+    final n = DateTime.now();
+    final stamp = '${n.year}${_two(n.month)}${_two(n.day)}_${_two(n.hour)}${_two(n.minute)}';
+    final filename = 'abc_tracker_export_$stamp.csv';
+    if (kIsWeb) {
+      downloadTextFile(filename, csv, 'text/csv;charset=utf-8');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Exported ${logs.length} entries to $filename')),
+      );
+    } else {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Export is available in the web app.')),
+      );
+    }
+  }
+
+  static const List<String> _csvColumns = [
+    'timestamp', 'student', 'period',
+    'antecedent', 'antecedentDescription',
+    'behavior', 'behaviorDescription',
+    'consequence', 'consequenceDescription',
+    'proactiveStrategy', 'staff', 'id',
+  ];
+
+  String _logsToCsv(List<Map<String, dynamic>> logs) {
+    String cell(String v) {
+      final escaped = v.replaceAll('"', '""');
+      return RegExp('[",\n\r]').hasMatch(v) ? '"$escaped"' : escaped;
+    }
+    // Leading BOM so Excel reads the UTF-8 (curly quotes, accents) correctly.
+    final sb = StringBuffer('﻿');
+    sb.writeln(_csvColumns.map(cell).join(','));
+    for (final log in logs) {
+      sb.writeln(_csvColumns.map((c) => cell('${log[c] ?? ''}')).join(','));
+    }
+    return sb.toString();
+  }
+
   Map<String, dynamic> _buildLogEntry() {
     return {
       'id': _generateLogId(),
@@ -844,6 +897,11 @@ ${buffer.toString()}''';
             icon: const Icon(Icons.history),
             tooltip: 'History',
             onPressed: _savedLogs.isNotEmpty ? _openHistoryScreen : null,
+          ),
+          IconButton(
+            icon: const Icon(Icons.download),
+            tooltip: 'Export all data (CSV)',
+            onPressed: _exportData,
           ),
           IconButton(
             icon: const Icon(Icons.settings),
