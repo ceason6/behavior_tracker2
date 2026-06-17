@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v14';
+const String kBuildTag = 'v15';
 
 String _anthropicEndpoint() {
   const override = String.fromEnvironment('ANTHROPIC_PROXY');
@@ -900,7 +900,7 @@ ${buffer.toString()}''';
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('New ABC Behavior Log'),
+        title: Text('New ABC Behavior Log  ($kBuildTag)'),
         actions: [
           IconButton(
             icon: const Icon(Icons.history),
