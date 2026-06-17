@@ -27,6 +27,11 @@ Future<void> main() async {
   final webDir = Platform.environment['WEB_DIR'] ?? 'build/web';
   final serverKey = (Platform.environment['ANTHROPIC_API_KEY'] ?? '').trim();
   final appPassword = Platform.environment['APP_PASSWORD'];
+  // When set, every request (except /healthz) must carry a matching
+  // X-Origin-Auth header. Cloudflare injects it via a Transform Rule, so the
+  // raw onrender.com URL (which lacks it) is blocked and only traffic that came
+  // through Cloudflare Access reaches the app. Inert until set.
+  final originSecret = (Platform.environment['ORIGIN_SHARED_SECRET'] ?? '').trim();
 
   final server = await HttpServer.bind(InternetAddress.anyIPv4, port);
   stdout.writeln('ABC Behavior Tracker proxy listening on http://localhost:$port');
@@ -40,7 +45,10 @@ Future<void> main() async {
   if (appPassword != null && appPassword.isNotEmpty) {
     stdout.writeln('Access gate: ON (APP_PASSWORD set — Basic auth required).');
   } else {
-    stdout.writeln('WARNING: APP_PASSWORD not set — the app is OPEN. Set APP_PASSWORD to require a login.');
+    stdout.writeln('WARNING: APP_PASSWORD not set — the app is OPEN unless ORIGIN_SHARED_SECRET is set.');
+  }
+  if (originSecret.isNotEmpty) {
+    stdout.writeln('Origin lock: ON (requires X-Origin-Auth header — Cloudflare-only access).');
   }
 
   await for (final req in server) {
@@ -58,6 +66,17 @@ Future<void> main() async {
         req.response.write('ok');
         await req.response.close();
         continue;
+      }
+      // Origin lock: block anything that didn't come through Cloudflare (which
+      // injects the secret header). This kills the raw onrender.com back door.
+      if (originSecret.isNotEmpty) {
+        final provided = req.headers.value('x-origin-auth');
+        if (provided == null || !_constantTimeEquals(provided, originSecret)) {
+          req.response.statusCode = HttpStatus.forbidden;
+          req.response.write('Forbidden.');
+          await req.response.close();
+          continue;
+        }
       }
       // Password gate (Basic auth) — applies to the app and the proxy alike.
       if (!_authorized(req, appPassword)) {
