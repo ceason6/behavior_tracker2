@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v13';
+const String kBuildTag = 'v14';
 
 String _anthropicEndpoint() {
   const override = String.fromEnvironment('ANTHROPIC_PROXY');
@@ -148,8 +148,10 @@ String _logsEndpoint() {
 final Random _idRandom = Random();
 
 /// A unique id for a log entry, stable across devices (timestamp + randomness).
+/// Uses millisecondsSinceEpoch (microsecondsSinceEpoch throws on the web) and a
+/// web-safe random bound (1<<32 misbehaves under JS bitwise ops).
 String _generateLogId() =>
-    '${DateTime.now().microsecondsSinceEpoch}-${_idRandom.nextInt(1 << 32)}';
+    '${DateTime.now().millisecondsSinceEpoch}-${_idRandom.nextInt(0x7fffffff)}';
 
 /// Cached Unicode-capable theme for the PDF report. The pdf package's built-in
 /// font only covers Latin-1, so even curly quotes, dashes and accents fail to
@@ -851,7 +853,8 @@ ${buffer.toString()}''';
   }
 
   Future<void> _saveLog() async {
-    if (_formKey.currentState!.validate()) {
+    if (!_formKey.currentState!.validate()) return;
+    try {
       final logEntry = _buildLogEntry();
       setState(() {
         _savedLogs.insert(0, logEntry);
@@ -865,6 +868,12 @@ ${buffer.toString()}''';
       _resetForm();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('✅ ABC Event Saved!')),
+      );
+    } catch (e) {
+      // Never fail silently — surface the problem so it can't look like a no-op.
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not save the event: $e')),
       );
     }
   }
