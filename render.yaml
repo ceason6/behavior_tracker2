@@ -12,9 +12,16 @@ services:
     name: abc-behavior-tracker
     runtime: docker
     dockerfilePath: ./Dockerfile
-    plan: free            # upgrade to "starter" to avoid free-tier cold starts
+    plan: starter         # Starter (or higher) is required for a persistent disk
+                          # and keeps the app always-on (no free-tier cold starts).
     healthCheckPath: /healthz   # unauthenticated probe (the app itself is gated)
     autoDeploy: true
+    # Persistent disk for the shared ABC-log store (/data/logs.json) so all pilot
+    # users sync to the same data and it survives restarts/deploys.
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
     envVars:
       # Server-side Anthropic key. Set the value in the Render dashboard (secret).
       - key: ANTHROPIC_API_KEY
@@ -22,3 +29,6 @@ services:
       # Staff password gate. Set the value in the Render dashboard (it's a secret).
       - key: APP_PASSWORD
         sync: false
+      # Where the shared log store lives (matches the disk mountPath above).
+      - key: DATA_DIR
+        value: /data

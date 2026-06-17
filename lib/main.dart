@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -120,7 +122,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v10';
+const String kBuildTag = 'v11';
 
 String _anthropicEndpoint() {
   const override = String.fromEnvironment('ANTHROPIC_PROXY');
@@ -130,6 +132,22 @@ String _anthropicEndpoint() {
   if (kIsWeb) return '/v1/messages';
   return 'https://api.anthropic.com/v1/messages';
 }
+
+/// Endpoint for the shared ABC-log sync API (served by the same proxy).
+String _logsEndpoint() {
+  const override = String.fromEnvironment('ANTHROPIC_PROXY');
+  if (override.isNotEmpty) {
+    return '${override.replaceAll(RegExp(r'/+$'), '')}/api/logs';
+  }
+  if (kIsWeb) return '/api/logs';
+  return 'http://localhost:8787/api/logs';
+}
+
+final Random _idRandom = Random();
+
+/// A unique id for a log entry, stable across devices (timestamp + randomness).
+String _generateLogId() =>
+    '${DateTime.now().microsecondsSinceEpoch}-${_idRandom.nextInt(1 << 32)}';
 
 /// Cached Unicode-capable theme for the PDF report. The pdf package's built-in
 /// font only covers Latin-1, so even curly quotes, dashes and accents fail to
@@ -361,6 +379,7 @@ class _ABCLoggingScreenState extends State<ABCLoggingScreen> {
 
   List<Map<String, dynamic>> _savedLogs = [];
   DateTime selectedDateTime = DateTime.now();
+  Timer? _syncTimer;
 
   final List<String> students = ["CH", "EG", "IS", "LTG", "NR"];
   final List<String> periods = ["Bus a.m.", "Advisory", "First", "Second", "Third", "Fourth", "Lunch", "Fifth", "Sixth", "Seventh", "Bus p.m."];
@@ -388,7 +407,10 @@ class _ABCLoggingScreenState extends State<ABCLoggingScreen> {
   void initState() {
     super.initState();
     _initSpeech();
-    _loadSavedLogs();
+    // Load the local cache first (instant), then sync the shared data and poll
+    // so entries from all pilot users stay in sync.
+    _loadSavedLogs().then((_) => _syncFromServer());
+    _syncTimer = Timer.periodic(const Duration(seconds: 15), (_) => _syncFromServer());
   }
 
   Future<String?> _getStoredApiKey() async {
@@ -566,7 +588,10 @@ ${buffer.toString()}''';
         // Decode each entry independently so a single corrupt record doesn't
         // wipe out access to every other saved log.
         try {
-          parsed.add(Map<String, dynamic>.from(jsonDecode(jsonEntry) as Map<String, dynamic>));
+          final entry = Map<String, dynamic>.from(jsonDecode(jsonEntry) as Map<String, dynamic>);
+          // Legacy entries (pre-sync) have no id; give them one so they sync.
+          entry['id'] ??= _generateLogId();
+          parsed.add(entry);
         } catch (error) {
           debugPrint('Warning: skipping unreadable log entry: $error');
         }
@@ -592,8 +617,51 @@ ${buffer.toString()}''';
     }
   }
 
+  /// Pulls the shared log list from the server and merges it with local data.
+  /// The server is authoritative; any local-only entries (not yet accepted by
+  /// the server, e.g. saved while offline) are kept and re-pushed.
+  Future<void> _syncFromServer() async {
+    try {
+      final resp = await http.get(Uri.parse(_logsEndpoint()));
+      if (resp.statusCode != 200) return;
+      final data = jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
+      final serverLogs = (data['logs'] as List? ?? [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      final serverIds = serverLogs.map((e) => e['id']).toSet();
+      final localOnly =
+          _savedLogs.where((e) => e['id'] != null && !serverIds.contains(e['id'])).toList();
+      if (!mounted) return;
+      setState(() {
+        _savedLogs = [...serverLogs, ...localOnly];
+      });
+      await _persistSavedLogs();
+      // Retry any entries the server hasn't recorded yet.
+      for (final entry in localOnly) {
+        _pushEntry(entry);
+      }
+    } catch (_) {
+      // Offline or transient — keep showing the local cache; next tick retries.
+    }
+  }
+
+  /// Sends one entry to the shared store. Silently no-ops on failure; the next
+  /// sync tick will retry it (the entry stays in the local cache meanwhile).
+  Future<void> _pushEntry(Map<String, dynamic> entry) async {
+    try {
+      await http.post(
+        Uri.parse(_logsEndpoint()),
+        headers: {'content-type': 'application/json'},
+        body: jsonEncode(entry),
+      );
+    } catch (_) {
+      // Ignore; _syncFromServer retries unsynced entries.
+    }
+  }
+
   Map<String, dynamic> _buildLogEntry() {
     return {
+      'id': _generateLogId(),
       'student': selectedStudent ?? '',
       'period': selectedPeriod ?? '',
       'antecedent': selectedAntecedent ?? '',
@@ -736,6 +804,8 @@ ${buffer.toString()}''';
         _savedLogs.insert(0, logEntry);
       });
       await _persistSavedLogs();
+      // Push to the shared store so the other pilot users see it.
+      _pushEntry(logEntry);
       if (!mounted) return;
 
       // Clear the form automatically so it's ready for the next entry.
@@ -1026,6 +1096,7 @@ ${buffer.toString()}''';
 
   @override
   void dispose() {
+    _syncTimer?.cancel();
     _speech.stop();
     antecedentDescController.dispose();
     behaviorDescController.dispose();

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -22,6 +23,84 @@ import 'dart:io';
 ///                       pass HTTP Basic auth (browser shows a login prompt);
 ///                       any username, password must match. When unset, the app
 ///                       is open. The /healthz probe is always exempt.
+/// Shared, persistent store of ABC log entries so the pilot's users all see the
+/// same data. Entries are keyed by an `id` field; writes are serialized and
+/// persisted atomically (write-temp-then-rename) to survive crashes/restarts.
+class LogStore {
+  final File _file;
+  List<Map<String, dynamic>> _logs = [];
+  Future<void> _chain = Future<void>.value();
+
+  LogStore(this._file);
+
+  Future<void> load() async {
+    try {
+      if (await _file.exists()) {
+        final data = jsonDecode(await _file.readAsString());
+        if (data is List) {
+          _logs = data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        }
+      }
+    } catch (e) {
+      stderr.writeln('LogStore load error: ${e.runtimeType}');
+    }
+  }
+
+  List<Map<String, dynamic>> all() => _logs;
+
+  Future<void> upsert(Map<String, dynamic> entry) {
+    final id = entry['id'];
+    if (id == null) return Future<void>.value();
+    return _serialize(() async {
+      final idx = _logs.indexWhere((e) => e['id'] == id);
+      if (idx >= 0) {
+        _logs[idx] = entry;
+      } else {
+        _logs.add(entry);
+      }
+      await _persist();
+    });
+  }
+
+  Future<void> remove(String id) =>
+      _serialize(() async {
+        _logs.removeWhere((e) => e['id'] == id);
+        await _persist();
+      });
+
+  Future<void> _persist() async {
+    final tmp = File('${_file.path}.tmp');
+    await tmp.writeAsString(jsonEncode(_logs), flush: true);
+    await tmp.rename(_file.path);
+  }
+
+  // Serialize all mutations so concurrent requests can't corrupt the file.
+  Future<void> _serialize(Future<void> Function() op) {
+    final next = _chain.then((_) => op());
+    _chain = next.catchError((_) {});
+    return next;
+  }
+}
+
+/// Picks the first writable directory for persistent data: $DATA_DIR, then
+/// /data (the Render disk), then ./data (local dev).
+String _resolveDataDir() {
+  final configured = Platform.environment['DATA_DIR'];
+  for (final candidate in [configured, '/data', 'data']) {
+    if (candidate == null || candidate.isEmpty) continue;
+    try {
+      Directory(candidate).createSync(recursive: true);
+      final probe = File('$candidate/.write_test');
+      probe.writeAsStringSync('ok');
+      probe.deleteSync();
+      return candidate;
+    } catch (_) {
+      // try the next candidate
+    }
+  }
+  return 'data';
+}
+
 Future<void> main() async {
   final port = int.tryParse(Platform.environment['PORT'] ?? '') ?? 8787;
   final webDir = Platform.environment['WEB_DIR'] ?? 'build/web';
@@ -33,9 +112,14 @@ Future<void> main() async {
   // through Cloudflare Access reaches the app. Inert until set.
   final originSecret = (Platform.environment['ORIGIN_SHARED_SECRET'] ?? '').trim();
 
+  final dataDir = _resolveDataDir();
+  final store = LogStore(File('$dataDir/logs.json'));
+  await store.load();
+
   final server = await HttpServer.bind(InternetAddress.anyIPv4, port);
   stdout.writeln('ABC Behavior Tracker proxy listening on http://localhost:$port');
   stdout.writeln('Serving web app from: $webDir');
+  stdout.writeln('Shared log store: $dataDir/logs.json (${store.all().length} entries loaded).');
   if (serverKey.isNotEmpty) {
     final last4 = serverKey.length >= 4 ? serverKey.substring(serverKey.length - 4) : serverKey;
     stdout.writeln('Server-side key: using ANTHROPIC_API_KEY (ends ...$last4).');
@@ -93,6 +177,10 @@ Future<void> main() async {
         await _proxyMessages(req, serverKey);
         continue;
       }
+      if (req.uri.path == '/api/logs') {
+        await _handleLogs(req, store);
+        continue;
+      }
       await _serveStatic(req, webDir);
     } catch (e, st) {
       // FERPA: never log or return the exception message or request body — they
@@ -146,8 +234,42 @@ bool _constantTimeEquals(String a, String b) {
 
 void _setCors(HttpResponse res) {
   res.headers.set('Access-Control-Allow-Origin', '*');
-  res.headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.headers.set('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   res.headers.set('Access-Control-Allow-Headers', 'Content-Type, x-api-key, anthropic-version');
+}
+
+/// Shared ABC-log API used to sync entries across the pilot's users.
+///   GET    /api/logs        -> {"logs": [...]}
+///   POST   /api/logs        -> upsert one entry (JSON body with an `id`)
+///   DELETE /api/logs?id=ID  -> remove one entry
+Future<void> _handleLogs(HttpRequest req, LogStore store) async {
+  void writeJson(Object data) {
+    req.response.headers.contentType = ContentType('application', 'json', charset: 'utf-8');
+    req.response.add(utf8.encode(jsonEncode(data)));
+  }
+
+  if (req.method == 'GET') {
+    writeJson({'logs': store.all()});
+    await req.response.close();
+    return;
+  }
+  if (req.method == 'POST') {
+    final raw = await utf8.decoder.bind(req).join();
+    final entry = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+    await store.upsert(entry);
+    writeJson({'ok': true});
+    await req.response.close();
+    return;
+  }
+  if (req.method == 'DELETE') {
+    final id = req.uri.queryParameters['id'];
+    if (id != null) await store.remove(id);
+    writeJson({'ok': true});
+    await req.response.close();
+    return;
+  }
+  req.response.statusCode = HttpStatus.methodNotAllowed;
+  await req.response.close();
 }
 
 Future<void> _proxyMessages(HttpRequest req, String serverKey) async {
