@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v17';
+const String kBuildTag = 'v18';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -390,6 +390,10 @@ class _ABCLoggingScreenState extends State<ABCLoggingScreen> {
   List<Map<String, dynamic>> _savedLogs = [];
   DateTime selectedDateTime = DateTime.now();
   Timer? _syncTimer;
+  // Destructive controls (Clear all data) show only when the app is opened with
+  // ?admin=1, so the staff users can't wipe the shared data — only the
+  // coordinator, who uses the admin URL.
+  final bool _adminMode = Uri.base.queryParameters['admin'] == '1';
 
   final List<String> students = ["CH", "EG", "IS", "LTG", "NR"];
   final List<String> periods = ["Bus a.m.", "Advisory", "First", "Second", "Third", "Fourth", "Lunch", "Fifth", "Sixth", "Seventh", "Bus p.m."];
@@ -970,11 +974,12 @@ ${buffer.toString()}''';
             tooltip: 'Export all data (CSV)',
             onPressed: _exportData,
           ),
-          IconButton(
-            icon: const Icon(Icons.delete_sweep),
-            tooltip: 'Clear all data (start fresh)',
-            onPressed: _resetAllData,
-          ),
+          if (_adminMode)
+            IconButton(
+              icon: const Icon(Icons.delete_sweep),
+              tooltip: 'Clear all data (start fresh)',
+              onPressed: _resetAllData,
+            ),
           if (kAiFeaturesEnabled)
             IconButton(
               icon: const Icon(Icons.settings),
