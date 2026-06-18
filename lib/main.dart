@@ -124,7 +124,13 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v15';
+const String kBuildTag = 'v16';
+
+/// Master switch for the generative-AI features (FBA analysis + the "Generate
+/// Description" helper). Turned OFF during the pilot so no student data is sent
+/// to Anthropic until the FERPA data agreements are in place. Flip to true to
+/// re-enable everywhere.
+const bool kAiFeaturesEnabled = false;
 
 String _anthropicEndpoint() {
   const override = String.fromEnvironment('ANTHROPIC_PROXY');
@@ -912,11 +918,12 @@ ${buffer.toString()}''';
             tooltip: 'Export all data (CSV)',
             onPressed: _exportData,
           ),
-          IconButton(
-            icon: const Icon(Icons.settings),
-            tooltip: 'Generative AI settings',
-            onPressed: _promptForApiKey,
-          ),
+          if (kAiFeaturesEnabled)
+            IconButton(
+              icon: const Icon(Icons.settings),
+              tooltip: 'Generative AI settings',
+              onPressed: _promptForApiKey,
+            ),
         ],
       ),
       body: SingleChildScrollView(
@@ -1095,16 +1102,18 @@ ${buffer.toString()}''';
                   child: const Text("Save ABC Event"),
                 ),
               ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                height: 44,
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.smart_toy),
-                  label: const Text('Generate Description (AI)'),
-                  onPressed: _generateDescription,
+              if (kAiFeaturesEnabled) ...[
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  height: 44,
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.smart_toy),
+                    label: const Text('Generate Description (AI)'),
+                    onPressed: _generateDescription,
+                  ),
                 ),
-              ),
+              ],
               if (_savedLogs.isNotEmpty) ...[
                 const SizedBox(height: 24),
                 const Divider(),
@@ -2006,11 +2015,12 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
         actions: studentLogs.isEmpty
             ? null
             : [
-                IconButton(
-                  icon: const Icon(Icons.psychology),
-                  tooltip: 'AI behavior analysis',
-                  onPressed: _openAiAnalysis,
-                ),
+                if (kAiFeaturesEnabled)
+                  IconButton(
+                    icon: const Icon(Icons.psychology),
+                    tooltip: 'AI behavior analysis',
+                    onPressed: _openAiAnalysis,
+                  ),
                 IconButton(
                   icon: const Icon(Icons.print),
                   tooltip: 'Print report',
