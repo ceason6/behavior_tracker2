@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v16';
+const String kBuildTag = 'v17';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -639,8 +639,18 @@ ${buffer.toString()}''';
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList();
       final serverIds = serverLogs.map((e) => e['id']).toSet();
-      final localOnly =
-          _savedLogs.where((e) => e['id'] != null && !serverIds.contains(e['id'])).toList();
+      final clearedAt = (data['clearedAt'] as num?)?.toInt() ?? 0;
+      // Save-time is the millisecond prefix of the id ("<ms>-<rand>").
+      int saveTimeOf(Map<String, dynamic> e) =>
+          int.tryParse('${e['id']}'.split('-').first) ?? 0;
+      // Keep local-only entries to re-push — but drop any created before the
+      // last reset, so a wipe sticks instead of being resurrected from cache.
+      final localOnly = _savedLogs
+          .where((e) =>
+              e['id'] != null &&
+              !serverIds.contains(e['id']) &&
+              saveTimeOf(e) >= clearedAt)
+          .toList();
       if (!mounted) return;
       setState(() {
         _savedLogs = [...serverLogs, ...localOnly];
@@ -666,6 +676,48 @@ ${buffer.toString()}''';
       );
     } catch (_) {
       // Ignore; _syncFromServer retries unsynced entries.
+    }
+  }
+
+  /// Wipes ALL shared data (server + this device) after confirmation. The server
+  /// records the reset time so other devices' cached entries can't re-push.
+  Future<void> _resetAllData() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Clear ALL data?'),
+        content: const Text(
+            'This permanently deletes every logged event for ALL users. '
+            'Use it to start a fresh pilot. This cannot be undone.\n\n'
+            'Tip: export a CSV backup first.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete everything'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      final resp = await http.delete(Uri.parse(_logsEndpoint()));
+      if (resp.statusCode != 200) {
+        throw Exception('server returned ${resp.statusCode}');
+      }
+      if (!mounted) return;
+      setState(() => _savedLogs = []);
+      await _persistSavedLogs();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('All data cleared.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not clear data: $e')),
+      );
     }
   }
 
@@ -917,6 +969,11 @@ ${buffer.toString()}''';
             icon: const Icon(Icons.download),
             tooltip: 'Export all data (CSV)',
             onPressed: _exportData,
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_sweep),
+            tooltip: 'Clear all data (start fresh)',
+            onPressed: _resetAllData,
           ),
           if (kAiFeaturesEnabled)
             IconButton(

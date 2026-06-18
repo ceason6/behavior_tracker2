@@ -29,16 +29,28 @@ import 'dart:io';
 class LogStore {
   final File _file;
   List<Map<String, dynamic>> _logs = [];
+  // When the store was last wiped (ms since epoch). Entries whose id encodes a
+  // save-time older than this are rejected, so a client that still has stale
+  // data cached can't re-push it after a reset.
+  int _clearedAt = 0;
   Future<void> _chain = Future<void>.value();
 
   LogStore(this._file);
+
+  int get clearedAt => _clearedAt;
 
   Future<void> load() async {
     try {
       if (await _file.exists()) {
         final data = jsonDecode(await _file.readAsString());
         if (data is List) {
+          // Legacy format: a bare list of entries.
           _logs = data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        } else if (data is Map) {
+          _clearedAt = (data['clearedAt'] as num?)?.toInt() ?? 0;
+          _logs = ((data['logs'] as List?) ?? [])
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList();
         }
       }
     } catch (e) {
@@ -48,9 +60,15 @@ class LogStore {
 
   List<Map<String, dynamic>> all() => _logs;
 
+  // Save-time is the millisecond prefix of the entry id ("<ms>-<rand>").
+  int _saveTimeOf(Map<String, dynamic> entry) =>
+      int.tryParse('${entry['id']}'.split('-').first) ?? 0;
+
   Future<void> upsert(Map<String, dynamic> entry) {
     final id = entry['id'];
     if (id == null) return Future<void>.value();
+    // Reject stale re-pushes of entries created before the last reset.
+    if (_saveTimeOf(entry) < _clearedAt) return Future<void>.value();
     return _serialize(() async {
       final idx = _logs.indexWhere((e) => e['id'] == id);
       if (idx >= 0) {
@@ -68,9 +86,18 @@ class LogStore {
         await _persist();
       });
 
+  // Wipe everything and stamp the reset time so stale re-pushes are blocked.
+  Future<void> clear(int now) =>
+      _serialize(() async {
+        _logs = [];
+        _clearedAt = now;
+        await _persist();
+      });
+
   Future<void> _persist() async {
     final tmp = File('${_file.path}.tmp');
-    await tmp.writeAsString(jsonEncode(_logs), flush: true);
+    await tmp.writeAsString(
+        jsonEncode({'clearedAt': _clearedAt, 'logs': _logs}), flush: true);
     await tmp.rename(_file.path);
   }
 
@@ -249,7 +276,7 @@ Future<void> _handleLogs(HttpRequest req, LogStore store) async {
   }
 
   if (req.method == 'GET') {
-    writeJson({'logs': store.all()});
+    writeJson({'logs': store.all(), 'clearedAt': store.clearedAt});
     await req.response.close();
     return;
   }
@@ -263,7 +290,12 @@ Future<void> _handleLogs(HttpRequest req, LogStore store) async {
   }
   if (req.method == 'DELETE') {
     final id = req.uri.queryParameters['id'];
-    if (id != null) await store.remove(id);
+    if (id != null) {
+      await store.remove(id);
+    } else {
+      // No id => wipe everything (used by the in-app "Reset data" button).
+      await store.clear(DateTime.now().millisecondsSinceEpoch);
+    }
     writeJson({'ok': true});
     await req.response.close();
     return;
