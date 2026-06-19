@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v22';
+const String kBuildTag = 'v23';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -2745,107 +2745,6 @@ Be concise and base every statement on the provided data. If the data are insuff
   }
 
   /// One reusable bar-chart card with a count table beneath it.
-  Widget _barCard(
-    BuildContext context, {
-    required String title,
-    required List<String> labels,
-    required List<int> counts,
-    String? caption,
-    bool thinLabels = false,
-  }) {
-    final theme = Theme.of(context);
-    if (labels.isEmpty) {
-      return Card(
-        child: Padding(
-          padding: const EdgeInsets.all(14.0),
-          child: Text('$title — no data yet.',
-              style: theme.textTheme.bodyMedium?.copyWith(color: Colors.grey[700])),
-        ),
-      );
-    }
-    final maxCount = counts.reduce((a, b) => a > b ? a : b);
-    final n = labels.length;
-    final barWidth = n > 24 ? 6.0 : (n > 12 ? 10.0 : 18.0);
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
-            const SizedBox(height: 16),
-            SizedBox(
-              height: 250,
-              child: BarChart(
-                BarChartData(
-                  alignment: BarChartAlignment.spaceAround,
-                  maxY: (maxCount.toDouble() + 2).ceilToDouble(),
-                  barTouchData: BarTouchData(enabled: true),
-                  titlesData: FlTitlesData(
-                    show: true,
-                    leftTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: true, reservedSize: 40),
-                    ),
-                    bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        getTitlesWidget: (value, meta) {
-                          final i = value.toInt();
-                          if (i < 0 || i >= labels.length) return const Text('');
-                          if (thinLabels && !_showLabelAt(i, labels.length)) return const Text('');
-                          final lab = labels[i];
-                          return Transform.rotate(
-                            angle: -0.3,
-                            child: Text(
-                              lab.length > 12 ? '${lab.substring(0, 12)}...' : lab,
-                              style: const TextStyle(fontSize: 9),
-                              textAlign: TextAlign.center,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          );
-                        },
-                        reservedSize: 70,
-                      ),
-                    ),
-                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                  ),
-                  gridData: const FlGridData(show: true, drawHorizontalLine: true, drawVerticalLine: false),
-                  barGroups: List.generate(
-                    labels.length,
-                    (i) => BarChartGroupData(
-                      x: i,
-                      barRods: [BarChartRodData(toY: counts[i].toDouble(), color: Colors.indigo, width: barWidth)],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            if (caption != null)
-              Text(caption, style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[700])),
-            const SizedBox(height: 8),
-            ...List.generate(
-              labels.length,
-              (i) => Padding(
-                padding: const EdgeInsets.symmetric(vertical: 3.0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(child: Text(labels[i], style: theme.textTheme.bodySmall)),
-                    Text(counts[i].toString(),
-                        style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _legend(Map<String, Color> colors) {
     return Wrap(
       spacing: 12,
@@ -3133,72 +3032,109 @@ Be concise and base every statement on the provided data. If the data are insuff
     final dateMap = _behaviorBy('date');
     final dateCols = (<String>{for (final m in dateMap.values) ...m.keys}.toList())..sort();
 
-    Widget heading(String t) => Padding(
-          padding: const EdgeInsets.only(top: 24, bottom: 12),
-          child: Text(t, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+    // Headline stats.
+    final topBehavior = behaviorTotals.isNotEmpty ? behaviorTotals.first : null;
+    final periodTotals = _sortedDesc(_countBy('period'));
+    final busiestPeriod = periodTotals.isNotEmpty ? periodTotals.first.key : '-';
+    final weekdayTotals = _countsByWeekday()..sort((a, b) => b.value.compareTo(a.value));
+    final busiestDay = weekdayTotals.isNotEmpty ? weekdayTotals.first.key : '-';
+
+    Widget statTile(String value, String label) => Card(
+          child: Container(
+            width: 158,
+            padding: const EdgeInsets.all(12.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 2),
+                Text(label, style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[700])),
+              ],
+            ),
+          ),
         );
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('School Dashboard'),
-        actions: [
-          if (kAiFeaturesEnabled)
-            IconButton(
-              icon: const Icon(Icons.psychology),
-              tooltip: 'AI school analysis',
-              onPressed: _openSchoolAi,
-            ),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16.0),
-        children: [
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(14.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+    return DefaultTabController(
+      length: 3,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('School Dashboard'),
+          actions: [
+            if (kAiFeaturesEnabled)
+              IconButton(
+                icon: const Icon(Icons.psychology),
+                tooltip: 'AI school analysis',
+                onPressed: _openSchoolAi,
+              ),
+          ],
+          bottom: const TabBar(
+            tabs: [Tab(text: 'Overview'), Tab(text: 'Patterns'), Tab(text: 'Daily')],
+          ),
+        ),
+        body: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
                 children: [
-                  Text('School-wide overview',
-                      style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  Text('Total events: ${logs.length}'),
-                  Text('Students with data: ${_uniqueStudents()}'),
-                  Text('Date range: ${_dateRange()}'),
+                  statTile('${logs.length}', 'Total events'),
+                  statTile(topBehavior != null ? '${topBehavior.value}' : '-',
+                      topBehavior != null ? 'Top: ${topBehavior.key}' : 'Top behavior'),
+                  statTile(busiestPeriod, 'Busiest period'),
+                  statTile(busiestDay, 'Busiest day'),
                 ],
               ),
             ),
-          ),
-          heading('Behaviors over time (all students)'),
-          _granularitySelector(),
-          const SizedBox(height: 16),
-          _buildStackedTimeChart(context, colors),
-          heading('Which behaviors are occurring'),
-          _barCard(context,
-              title: 'Behavior frequency',
-              labels: behaviorTotals.map((e) => e.key).toList(),
-              counts: behaviorTotals.map((e) => e.value).toList(),
-              caption: 'Total occurrences by behavior'),
-          heading('By school period'),
-          _heatmap(context,
-              title: 'Behavior × period',
-              rows: behaviorRows,
-              cols: periodCols,
-              valueAt: (r, c) => periodMap[r]?[c] ?? 0),
-          heading('By day of week'),
-          _heatmap(context,
-              title: 'Behavior × day of week',
-              rows: behaviorRows,
-              cols: weekdayCols,
-              valueAt: (r, c) => weekdayMap[r]?[c] ?? 0),
-          heading('Behaviors by day'),
-          _heatmap(context,
-              title: 'Behavior × date',
-              rows: behaviorRows,
-              cols: dateCols,
-              valueAt: (r, c) => dateMap[r]?[c] ?? 0),
-          const SizedBox(height: 24),
-        ],
+            Expanded(
+              child: TabBarView(
+                children: [
+                  // Overview: behaviors over time, stacked by type.
+                  ListView(
+                    padding: const EdgeInsets.all(16.0),
+                    children: [
+                      _granularitySelector(),
+                      const SizedBox(height: 16),
+                      _buildStackedTimeChart(context, colors),
+                    ],
+                  ),
+                  // Patterns: hotspot heatmaps.
+                  ListView(
+                    padding: const EdgeInsets.all(16.0),
+                    children: [
+                      _heatmap(context,
+                          title: 'Behavior × period',
+                          rows: behaviorRows,
+                          cols: periodCols,
+                          valueAt: (r, c) => periodMap[r]?[c] ?? 0),
+                      const SizedBox(height: 16),
+                      _heatmap(context,
+                          title: 'Behavior × day of week',
+                          rows: behaviorRows,
+                          cols: weekdayCols,
+                          valueAt: (r, c) => weekdayMap[r]?[c] ?? 0),
+                    ],
+                  ),
+                  // Daily: behavior by date.
+                  ListView(
+                    padding: const EdgeInsets.all(16.0),
+                    children: [
+                      _heatmap(context,
+                          title: 'Behavior × date',
+                          rows: behaviorRows,
+                          cols: dateCols,
+                          valueAt: (r, c) => dateMap[r]?[c] ?? 0),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
