@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v23';
+const String kBuildTag = 'v24';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -2664,23 +2664,24 @@ Be concise and base every statement on the provided data. If the data are insuff
   int _uniqueStudents() =>
       logs.map((l) => _logStr(l, 'student')).where((s) => s.isNotEmpty).toSet().length;
 
-  // Distinct, readable colors assigned to behaviors (stable, by overall rank).
-  static const List<Color> _palette = [
-    Color(0xFF3949AB), Color(0xFFE53935), Color(0xFF43A047), Color(0xFFFB8C00),
-    Color(0xFF8E24AA), Color(0xFF00ACC1), Color(0xFFC0CA33), Color(0xFF6D4C41),
-    Color(0xFFEC407A), Color(0xFF26A69A), Color(0xFF5E35B1), Color(0xFF757575),
+  // Grayscale shades (copier/B&W friendly) cycled across behaviors, plus a
+  // matching symbol per behavior so they're identifiable in black-and-white.
+  static const List<Color> _grays = [
+    Color(0xFF1A1A1A), Color(0xFF8C8C8C), Color(0xFF4D4D4D), Color(0xFFBFBFBF),
+    Color(0xFF333333), Color(0xFF9E9E9E), Color(0xFF666666), Color(0xFFD6D6D6),
+  ];
+  static const List<String> _symbols = [
+    '●', '■', '▲', '◆', '★', '✚', '▼', '◯', '□', '△', '▽', '✖',
   ];
 
-  /// behavior -> color, ordered by overall frequency so the biggest behaviors
-  /// get the most distinct hues.
-  Map<String, Color> _behaviorColors() {
-    final ordered = _sortedDesc(_countBy('behavior')).map((e) => e.key).toList();
-    final map = <String, Color>{};
-    for (var i = 0; i < ordered.length; i++) {
-      map[ordered[i]] = _palette[i % _palette.length];
-    }
-    return map;
-  }
+  /// Behaviors ordered by overall frequency (stable order for legend + bars).
+  List<String> _behaviorOrder() => _sortedDesc(_countBy('behavior')).map((e) => e.key).toList();
+
+  Map<String, Color> _behaviorShades(List<String> order) =>
+      {for (var i = 0; i < order.length; i++) order[i]: _grays[i % _grays.length]};
+
+  Map<String, String> _behaviorSymbols(List<String> order) =>
+      {for (var i = 0; i < order.length; i++) order[i]: _symbols[i % _symbols.length]};
 
   /// bucket -> behavior -> count, at the current granularity.
   Map<String, Map<String, int>> _bucketBehaviorCounts() {
@@ -2745,53 +2746,75 @@ Be concise and base every statement on the provided data. If the data are insuff
   }
 
   /// One reusable bar-chart card with a count table beneath it.
-  Widget _legend(Map<String, Color> colors) {
+  /// B&W-friendly legend: a grayscale swatch + a symbol + the behavior name.
+  Widget _legend(List<String> behaviors, Map<String, Color> shades, Map<String, String> symbols) {
     return Wrap(
-      spacing: 12,
+      spacing: 14,
       runSpacing: 6,
-      children: colors.entries
-          .map((e) => Row(mainAxisSize: MainAxisSize.min, children: [
+      children: behaviors
+          .map((b) => Row(mainAxisSize: MainAxisSize.min, children: [
                 Container(
-                    width: 12,
-                    height: 12,
-                    decoration: BoxDecoration(color: e.value, borderRadius: BorderRadius.circular(2))),
+                  width: 16,
+                  height: 16,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: shades[b],
+                    border: Border.all(color: Colors.black26),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                  child: Text(symbols[b] ?? '',
+                      style: TextStyle(
+                          fontSize: 10,
+                          color: (shades[b] ?? Colors.grey).computeLuminance() < 0.5
+                              ? Colors.white
+                              : Colors.black)),
+                ),
                 const SizedBox(width: 4),
-                Text(e.key, style: const TextStyle(fontSize: 11)),
+                Text(b, style: const TextStyle(fontSize: 11)),
               ]))
           .toList(),
     );
   }
 
-  /// Stacked bar chart: one bar per time bucket, segmented (and colored) by
-  /// behavior, so volume, composition, and trend are all visible at once.
-  Widget _buildStackedTimeChart(BuildContext context, Map<String, Color> colors) {
+  /// Grouped bar chart: each behavior is its own bar, placed side by side within
+  /// each time bucket. Grayscale fills (+ symbol legend) so it copies in B&W.
+  Widget _buildGroupedTimeChart(
+    BuildContext context,
+    List<String> behaviors,
+    Map<String, Color> shades,
+    Map<String, String> symbols,
+  ) {
     final byBucket = _bucketBehaviorCounts();
     final keys = byBucket.keys.toList()..sort();
     if (keys.isEmpty) return const SizedBox.shrink();
-    final behaviors = colors.keys.toList();
-    double maxTotal = 0;
+    double maxV = 0;
     for (final k in keys) {
-      final t = byBucket[k]!.values.fold<int>(0, (s, v) => s + v).toDouble();
-      if (t > maxTotal) maxTotal = t;
+      for (final b in behaviors) {
+        final c = (byBucket[k]![b] ?? 0).toDouble();
+        if (c > maxV) maxV = c;
+      }
     }
     final theme = Theme.of(context);
-    final n = keys.length;
-    final barWidth = n > 24 ? 8.0 : (n > 12 ? 12.0 : 20.0);
+    final density = keys.length * behaviors.length;
+    final rodW = density > 120 ? 3.0 : (density > 60 ? 4.5 : 7.0);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('${_granularity.label} behaviors (stacked by type)',
+            Text('${_granularity.label} behaviors (each behavior side by side)',
                 style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 4),
+            Text('Tip: use Weekly/Monthly if Daily looks crowded.',
+                style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[600])),
             const SizedBox(height: 16),
             SizedBox(
               height: 260,
               child: BarChart(
                 BarChartData(
                   alignment: BarChartAlignment.spaceAround,
-                  maxY: (maxTotal + 2).ceilToDouble(),
+                  maxY: (maxV + 1).ceilToDouble(),
                   barTouchData: BarTouchData(enabled: true),
                   titlesData: FlTitlesData(
                     show: true,
@@ -2821,24 +2844,18 @@ Be concise and base every statement on the provided data. If the data are insuff
                   gridData: const FlGridData(show: true, drawHorizontalLine: true, drawVerticalLine: false),
                   barGroups: List.generate(keys.length, (i) {
                     final counts = byBucket[keys[i]]!;
-                    double from = 0;
-                    final stack = <BarChartRodStackItem>[];
-                    for (final b in behaviors) {
-                      final c = (counts[b] ?? 0).toDouble();
-                      if (c <= 0) continue;
-                      stack.add(BarChartRodStackItem(from, from + c, colors[b]!));
-                      from += c;
-                    }
                     return BarChartGroupData(
                       x: i,
+                      barsSpace: 1.0,
                       barRods: [
-                        BarChartRodData(
-                          toY: from,
-                          width: barWidth,
-                          color: Colors.transparent,
-                          borderRadius: BorderRadius.zero,
-                          rodStackItems: stack,
-                        ),
+                        for (final b in behaviors)
+                          BarChartRodData(
+                            toY: (counts[b] ?? 0).toDouble(),
+                            color: shades[b],
+                            width: rodW,
+                            borderRadius: BorderRadius.zero,
+                            borderSide: const BorderSide(color: Colors.black12, width: 0.3),
+                          ),
                       ],
                     );
                   }),
@@ -2846,21 +2863,23 @@ Be concise and base every statement on the provided data. If the data are insuff
               ),
             ),
             const SizedBox(height: 12),
-            _legend(colors),
+            _legend(behaviors, shades, symbols),
           ],
         ),
       ),
     );
   }
 
-  /// A colored grid: [rows] down the side, [cols] across the top, cell color
-  /// intensity scaled to [valueAt]. Best view for spotting hotspots.
+  /// A grayscale grid (copier-friendly): [rows] down the side, [cols] across the
+  /// top, cell shade scaled to [valueAt], with row/column/grand totals. Optional
+  /// [rowSymbols] prefixes each row label with a B&W symbol.
   Widget _heatmap(
     BuildContext context, {
     required String title,
     required List<String> rows,
     required List<String> cols,
     required int Function(String row, String col) valueAt,
+    Map<String, String>? rowSymbols,
   }) {
     final theme = Theme.of(context);
     if (rows.isEmpty || cols.isEmpty) {
@@ -2872,20 +2891,64 @@ Be concise and base every statement on the provided data. If the data are insuff
         ),
       );
     }
+    final rowTotals = <String, int>{};
+    final colTotals = <String, int>{for (final c in cols) c: 0};
+    var grand = 0;
     var maxV = 0;
     for (final r in rows) {
+      var rt = 0;
       for (final c in cols) {
         final v = valueAt(r, c);
+        rt += v;
+        colTotals[c] = colTotals[c]! + v;
         if (v > maxV) maxV = v;
       }
+      rowTotals[r] = rt;
+      grand += rt;
     }
+    // Grayscale ramp: empty = white, low = light gray, high = near-black.
     Color cellColor(int v) {
-      if (v <= 0) return const Color(0xFFF5F5F5);
-      final t = (v / (maxV == 0 ? 1 : maxV)).clamp(0.18, 1.0);
-      return Color.lerp(const Color(0xFFE8EAF6), const Color(0xFF1A237E), t)!;
+      if (v <= 0) return Colors.white;
+      final t = (v / (maxV == 0 ? 1 : maxV)).clamp(0.15, 1.0);
+      return Color.lerp(const Color(0xFFEEEEEE), const Color(0xFF222222), t)!;
     }
 
-    const cellW = 48.0, cellH = 34.0, rowLabelW = 130.0;
+    const cellW = 48.0, cellH = 34.0, rowLabelW = 140.0, totalW = 52.0;
+    const totalBg = Color(0xFFE0E0E0);
+
+    Widget headerCell(String s, double w) => SizedBox(
+          width: w,
+          height: cellH,
+          child: Center(
+            child: Text(s,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700)),
+          ),
+        );
+    Widget dataCell(int v) {
+      final bg = cellColor(v);
+      final fg = bg.computeLuminance() < 0.5 ? Colors.white : Colors.black87;
+      return Container(
+        width: cellW - 2,
+        height: cellH - 2,
+        margin: const EdgeInsets.all(1),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(color: bg, border: Border.all(color: Colors.black12, width: 0.5)),
+        child: Text(v > 0 ? '$v' : '',
+            style: TextStyle(fontSize: 11, color: fg, fontWeight: FontWeight.w600)),
+      );
+    }
+    Widget totalCell(int v, double w) => Container(
+          width: w - 2,
+          height: cellH - 2,
+          margin: const EdgeInsets.all(1),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(color: totalBg, border: Border.all(color: Colors.black26, width: 0.5)),
+          child: Text('$v', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800)),
+        );
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -2894,7 +2957,7 @@ Be concise and base every statement on the provided data. If the data are insuff
           children: [
             Text(title, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
             const SizedBox(height: 4),
-            Text('Darker = more frequent',
+            Text('Darker = more frequent · Total column/row included',
                 style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[600])),
             const SizedBox(height: 12),
             SingleChildScrollView(
@@ -2904,44 +2967,36 @@ Be concise and base every statement on the provided data. If the data are insuff
                 children: [
                   Row(children: [
                     const SizedBox(width: rowLabelW),
-                    ...cols.map((c) => SizedBox(
-                          width: cellW,
-                          height: cellH,
-                          child: Center(
-                            child: Text(c,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700)),
-                          ),
-                        )),
+                    ...cols.map((c) => headerCell(c, cellW)),
+                    headerCell('Total', totalW),
                   ]),
                   ...rows.map((r) => Row(children: [
                         SizedBox(
                           width: rowLabelW,
                           child: Padding(
                             padding: const EdgeInsets.only(right: 6.0),
-                            child: Text(r,
+                            child: Text(
+                                rowSymbols != null ? '${rowSymbols[r] ?? ''}  $r' : r,
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(fontSize: 11)),
                           ),
                         ),
-                        ...cols.map((c) {
-                          final v = valueAt(r, c);
-                          final bg = cellColor(v);
-                          final fg = bg.computeLuminance() < 0.5 ? Colors.white : Colors.black87;
-                          return Container(
-                            width: cellW - 2,
-                            height: cellH - 2,
-                            margin: const EdgeInsets.all(1),
-                            alignment: Alignment.center,
-                            color: bg,
-                            child: Text(v > 0 ? '$v' : '',
-                                style: TextStyle(fontSize: 11, color: fg, fontWeight: FontWeight.w600)),
-                          );
-                        }),
+                        ...cols.map((c) => dataCell(valueAt(r, c))),
+                        totalCell(rowTotals[r] ?? 0, totalW),
                       ])),
+                  Row(children: [
+                    const SizedBox(
+                      width: rowLabelW,
+                      child: Padding(
+                        padding: EdgeInsets.only(right: 6.0),
+                        child: Text('Total',
+                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800)),
+                      ),
+                    ),
+                    ...cols.map((c) => totalCell(colTotals[c] ?? 0, cellW)),
+                    totalCell(grand, totalW),
+                  ]),
                 ],
               ),
             ),
@@ -3013,8 +3068,9 @@ Be concise and base every statement on the provided data. If the data are insuff
         body: const Center(child: Text('No behavior data yet.')),
       );
     }
-    final colors = _behaviorColors();
-    final behaviorRows = colors.keys.toList();
+    final behaviorRows = _behaviorOrder();
+    final shades = _behaviorShades(behaviorRows);
+    final symbols = _behaviorSymbols(behaviorRows);
     final behaviorTotals = _sortedDesc(_countBy('behavior'));
 
     final periodMap = _behaviorBy('period');
@@ -3085,8 +3141,8 @@ Be concise and base every statement on the provided data. If the data are insuff
                   statTile('${logs.length}', 'Total events'),
                   statTile(topBehavior != null ? '${topBehavior.value}' : '-',
                       topBehavior != null ? 'Top: ${topBehavior.key}' : 'Top behavior'),
-                  statTile(busiestPeriod, 'Busiest period'),
-                  statTile(busiestDay, 'Busiest day'),
+                  statTile(busiestPeriod, 'Peak Escalation Period'),
+                  statTile(busiestDay, 'Highest Incident Day'),
                 ],
               ),
             ),
@@ -3099,7 +3155,7 @@ Be concise and base every statement on the provided data. If the data are insuff
                     children: [
                       _granularitySelector(),
                       const SizedBox(height: 16),
-                      _buildStackedTimeChart(context, colors),
+                      _buildGroupedTimeChart(context, behaviorRows, shades, symbols),
                     ],
                   ),
                   // Patterns: hotspot heatmaps.
@@ -3110,13 +3166,15 @@ Be concise and base every statement on the provided data. If the data are insuff
                           title: 'Behavior × period',
                           rows: behaviorRows,
                           cols: periodCols,
-                          valueAt: (r, c) => periodMap[r]?[c] ?? 0),
+                          valueAt: (r, c) => periodMap[r]?[c] ?? 0,
+                          rowSymbols: symbols),
                       const SizedBox(height: 16),
                       _heatmap(context,
                           title: 'Behavior × day of week',
                           rows: behaviorRows,
                           cols: weekdayCols,
-                          valueAt: (r, c) => weekdayMap[r]?[c] ?? 0),
+                          valueAt: (r, c) => weekdayMap[r]?[c] ?? 0,
+                          rowSymbols: symbols),
                     ],
                   ),
                   // Daily: behavior by date.
@@ -3127,7 +3185,8 @@ Be concise and base every statement on the provided data. If the data are insuff
                           title: 'Behavior × date',
                           rows: behaviorRows,
                           cols: dateCols,
-                          valueAt: (r, c) => dateMap[r]?[c] ?? 0),
+                          valueAt: (r, c) => dateMap[r]?[c] ?? 0,
+                          rowSymbols: symbols),
                     ],
                   ),
                 ],
