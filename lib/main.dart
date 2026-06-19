@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v24';
+const String kBuildTag = 'v25';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -2579,6 +2579,26 @@ Be concise and practical, and base every statement on the provided data. If the 
   }
 }
 
+/// Date-range presets for the dashboard filter.
+enum _RangePreset { today, yesterday, thisWeek, lastWeek, yearToDate, custom }
+
+String _rangePresetLabel(_RangePreset r) {
+  switch (r) {
+    case _RangePreset.today:
+      return 'Today';
+    case _RangePreset.yesterday:
+      return 'Yesterday';
+    case _RangePreset.thisWeek:
+      return 'This Week';
+    case _RangePreset.lastWeek:
+      return 'Last Week';
+    case _RangePreset.yearToDate:
+      return 'Year to Date';
+    case _RangePreset.custom:
+      return 'Custom';
+  }
+}
+
 /// School-wide aggregate dashboard: behaviors across ALL students, viewable by
 /// day/week/month/year, by school period, and by day of week — plus an
 /// (AI-flag-gated) school-level pattern/escalation analysis.
@@ -2601,7 +2621,44 @@ class SchoolDashboardScreen extends StatefulWidget {
 
 class _SchoolDashboardScreenState extends State<SchoolDashboardScreen> {
   TimeGranularity _granularity = TimeGranularity.daily;
-  List<Map<String, dynamic>> get logs => widget.allLogs;
+  _RangePreset _range = _RangePreset.yearToDate;
+  DateTimeRange? _customRange;
+
+  /// Start/end (inclusive) of the currently selected date filter.
+  (DateTime, DateTime) _rangeBounds() {
+    final now = DateTime.now();
+    final todayStart = DateTime(now.year, now.month, now.day);
+    switch (_range) {
+      case _RangePreset.today:
+        return (todayStart, now);
+      case _RangePreset.yesterday:
+        return (todayStart.subtract(const Duration(days: 1)),
+            todayStart.subtract(const Duration(seconds: 1)));
+      case _RangePreset.thisWeek:
+        return (_weekStart(now), now);
+      case _RangePreset.lastWeek:
+        final thisWeekStart = _weekStart(now);
+        return (thisWeekStart.subtract(const Duration(days: 7)),
+            thisWeekStart.subtract(const Duration(seconds: 1)));
+      case _RangePreset.yearToDate:
+        return (DateTime(now.year, 1, 1), now);
+      case _RangePreset.custom:
+        final r = _customRange;
+        if (r == null) return (DateTime(now.year, 1, 1), now);
+        return (DateTime(r.start.year, r.start.month, r.start.day),
+            DateTime(r.end.year, r.end.month, r.end.day, 23, 59, 59));
+    }
+  }
+
+  /// All logs filtered to the selected date range — every chart/table/stat on
+  /// this screen reads from here, so they all stay in sync with the filter.
+  List<Map<String, dynamic>> get logs {
+    final (start, end) = _rangeBounds();
+    return widget.allLogs.where((l) {
+      final t = _logTimestamp(l).toLocal();
+      return !t.isBefore(start) && !t.isAfter(end);
+    }).toList();
+  }
 
   static const String _schoolSystemPrompt = '''You are a board-certified behavior analyst (BCBA) supporting a school team. Using ONLY the aggregated, de-identified school-wide ABC (antecedent-behavior-consequence) data provided (counts across all students), produce a structured report with these clearly labeled sections:
 
@@ -2742,6 +2799,62 @@ Be concise and base every statement on the provided data. If the data are insuff
         selected: {_granularity},
         onSelectionChanged: (selection) => setState(() => _granularity = selection.first),
       ),
+    );
+  }
+
+  Future<void> _pickCustomRange() async {
+    final now = DateTime.now();
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2024),
+      lastDate: DateTime(now.year + 1, 12, 31),
+      initialDateRange: _customRange,
+    );
+    if (picked == null) return;
+    setState(() {
+      _range = _RangePreset.custom;
+      _customRange = picked;
+    });
+  }
+
+  /// Date-range filter that controls the whole dashboard (graph + tables + tiles).
+  Widget _rangeSelector() {
+    final theme = Theme.of(context);
+    final (start, end) = _rangeBounds();
+    final showsCustom = _range == _RangePreset.custom && _customRange != null;
+    return Row(
+      children: [
+        const Icon(Icons.date_range, size: 18),
+        const SizedBox(width: 6),
+        DropdownButton<_RangePreset>(
+          value: _range,
+          isDense: true,
+          items: _RangePreset.values
+              .map((r) => DropdownMenuItem(value: r, child: Text(_rangePresetLabel(r))))
+              .toList(),
+          onChanged: (r) {
+            if (r == null) return;
+            if (r == _RangePreset.custom) {
+              _pickCustomRange();
+            } else {
+              setState(() => _range = r);
+            }
+          },
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: GestureDetector(
+            onTap: showsCustom ? _pickCustomRange : null,
+            child: Text(
+              showsCustom
+                  ? '${_dateKey(start)} → ${_dateKey(end)}  (tap to change)'
+                  : '${_dateKey(start)} → ${_dateKey(end)}',
+              style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[700]),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -3062,7 +3175,7 @@ Be concise and base every statement on the provided data. If the data are insuff
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    if (logs.isEmpty) {
+    if (widget.allLogs.isEmpty) {
       return Scaffold(
         appBar: AppBar(title: const Text('School Dashboard')),
         body: const Center(child: Text('No behavior data yet.')),
@@ -3145,6 +3258,10 @@ Be concise and base every statement on the provided data. If the data are insuff
                   statTile(busiestDay, 'Highest Incident Day'),
                 ],
               ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+              child: _rangeSelector(),
             ),
             Expanded(
               child: TabBarView(
