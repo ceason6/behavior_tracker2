@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v19';
+const String kBuildTag = 'v20';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -725,6 +725,62 @@ ${buffer.toString()}''';
     }
   }
 
+  /// Generates a batch of realistic DUMMY events (admin/testing only) spread
+  /// across students, periods, behaviors and the last few weeks, then pushes
+  /// them to the shared store. Use "Clear all data" before the real pilot.
+  Future<void> _loadSampleData() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Load sample data?'),
+        content: const Text(
+            'Adds ~60 fake events (for testing the dashboard). They sync to the '
+            'shared store like real entries.\n\nRemember to use "Clear all data" '
+            'before the real pilot starts.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Add sample data')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    final rng = Random();
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final now = DateTime.now();
+    String pick(List<String> l) => l[rng.nextInt(l.length)];
+    final generated = <Map<String, dynamic>>[];
+    for (var i = 0; i < 60; i++) {
+      var day = now.subtract(Duration(days: rng.nextInt(21)));
+      // Bias toward weekdays (school days).
+      if (day.weekday > 5) day = day.subtract(Duration(days: day.weekday - 5));
+      final ts = DateTime(day.year, day.month, day.day, 8 + rng.nextInt(8), rng.nextInt(60));
+      generated.add({
+        'id': '${nowMs + i}-${rng.nextInt(0x7fffffff)}',
+        'student': pick(students),
+        'period': pick(periods),
+        'antecedent': pick(antecedents),
+        'antecedentDescription': '',
+        'behavior': pick(behaviors),
+        'behaviorDescription': '',
+        'consequence': pick(consequences),
+        'consequenceDescription': '',
+        'proactiveStrategy': pick(proactiveStrategies),
+        'staff': pick(staffMembers),
+        'timestamp': ts.toIso8601String(),
+        'ai': <String, dynamic>{},
+      });
+    }
+    setState(() => _savedLogs.insertAll(0, generated));
+    await _persistSavedLogs();
+    for (final e in generated) {
+      _pushEntry(e);
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Added ${generated.length} sample events.')),
+    );
+  }
+
   /// Pulls the latest shared data, then downloads all entries as a CSV file.
   Future<void> _exportData() async {
     await _syncFromServer();
@@ -996,6 +1052,12 @@ ${buffer.toString()}''';
             tooltip: 'Export all data (CSV)',
             onPressed: _exportData,
           ),
+          if (_adminMode)
+            IconButton(
+              icon: const Icon(Icons.science),
+              tooltip: 'Load sample data (testing)',
+              onPressed: _loadSampleData,
+            ),
           if (_adminMode)
             IconButton(
               icon: const Icon(Icons.delete_sweep),
