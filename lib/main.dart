@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v18';
+const String kBuildTag = 'v19';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -817,6 +817,23 @@ ${buffer.toString()}''';
     ));
   }
 
+  Future<void> _openSchoolDashboard() async {
+    String? apiKey;
+    // Only needed for the (currently hidden) AI analysis on mobile/desktop.
+    if (!kIsWeb) {
+      try {
+        apiKey = await _secureStorage.read(key: 'anthropic_api_key');
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (context) => SchoolDashboardScreen(
+        allLogs: List.of(_savedLogs),
+        apiKey: apiKey ?? '',
+      ),
+    ));
+  }
+
   Future<void> _openStudentHistoryScreen(String student) async {
     if (!mounted) return;
     await Navigator.of(context).push(MaterialPageRoute(
@@ -964,6 +981,11 @@ ${buffer.toString()}''';
       appBar: AppBar(
         title: Text('New ABC Behavior Log  ($kBuildTag)'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.insights),
+            tooltip: 'School dashboard',
+            onPressed: _savedLogs.isNotEmpty ? _openSchoolDashboard : null,
+          ),
           IconButton(
             icon: const Icon(Icons.history),
             tooltip: 'History',
@@ -2246,12 +2268,17 @@ class StudentAiAnalysisScreen extends StatefulWidget {
   final String student;
   final String apiKey;
   final String userPrompt;
+  // Optional overrides so this screen can also render a school-wide analysis.
+  final String? title;
+  final String? systemPromptOverride;
 
   const StudentAiAnalysisScreen({
     super.key,
     required this.student,
     required this.apiKey,
     required this.userPrompt,
+    this.title,
+    this.systemPromptOverride,
   });
 
   @override
@@ -2319,7 +2346,7 @@ Be concise and practical, and base every statement on the provided data. If the 
     try {
       final text = await AnthropicClient.generateAnalysis(
         apiKey: _apiKey,
-        systemPrompt: _systemPrompt,
+        systemPrompt: widget.systemPromptOverride ?? _systemPrompt,
         userPrompt: widget.userPrompt,
       );
       if (!mounted) return;
@@ -2386,7 +2413,7 @@ Be concise and practical, and base every statement on the provided data. If the 
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: Text('AI Analysis - ${widget.student}'),
+        title: Text(widget.title ?? 'AI Analysis - ${widget.student}'),
         actions: [
           if (_result != null)
             IconButton(
@@ -2485,6 +2512,325 @@ Be concise and practical, and base every statement on the provided data. If the 
                     ),
                   ],
                 ),
+    );
+  }
+}
+
+/// School-wide aggregate dashboard: behaviors across ALL students, viewable by
+/// day/week/month/year, by school period, and by day of week — plus an
+/// (AI-flag-gated) school-level pattern/escalation analysis.
+class SchoolDashboardScreen extends StatefulWidget {
+  final List<Map<String, dynamic>> allLogs;
+  final String apiKey;
+
+  const SchoolDashboardScreen({super.key, required this.allLogs, required this.apiKey});
+
+  @override
+  State<SchoolDashboardScreen> createState() => _SchoolDashboardScreenState();
+}
+
+class _SchoolDashboardScreenState extends State<SchoolDashboardScreen> {
+  TimeGranularity _granularity = TimeGranularity.daily;
+  List<Map<String, dynamic>> get logs => widget.allLogs;
+
+  static const String _schoolSystemPrompt = '''You are a board-certified behavior analyst (BCBA) supporting a school team. Using ONLY the aggregated, de-identified school-wide ABC (antecedent-behavior-consequence) data provided (counts across all students), produce a structured report with these clearly labeled sections:
+
+1. Summary — a concise 2-4 sentence overview of the school-wide behavior picture.
+2. School-Wide Patterns — notable patterns across behaviors, school periods/times, day of week, and trends over time.
+3. Predicted Escalations — the periods, days, and conditions most likely to precede increases in behavior, plus early warning signs, based on the data.
+4. School-Level Recommendations — specific, evidence-based proactive strategies at the school/schedule/environment level (e.g. transition supports, staffing during high-risk periods), each tied to a pattern in the data.
+
+Be concise and base every statement on the provided data. If the data are insufficient to support a conclusion, say so explicitly. End with a one-line disclaimer that this is AI-generated decision support and not a substitute for professional judgment.''';
+
+  Map<String, int> _countBy(String key) {
+    final m = <String, int>{};
+    for (final log in logs) {
+      final v = _logStr(log, key);
+      final label = v.isNotEmpty ? v : 'Unspecified';
+      m[label] = (m[label] ?? 0) + 1;
+    }
+    return m;
+  }
+
+  List<MapEntry<String, int>> _sortedDesc(Map<String, int> m) =>
+      m.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+
+  List<MapEntry<String, int>> _eventCountsByBucket() {
+    final data = <String, int>{};
+    for (final log in logs) {
+      final k = _bucketKey(_logTimestamp(log), _granularity);
+      data[k] = (data[k] ?? 0) + 1;
+    }
+    return data.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
+  }
+
+  /// Counts by day of week, in Monday..Sunday order (days with no data omitted).
+  List<MapEntry<String, int>> _countsByWeekday() {
+    const names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    final counts = List<int>.filled(7, 0);
+    for (final log in logs) {
+      counts[_logTimestamp(log).toLocal().weekday - 1]++;
+    }
+    final out = <MapEntry<String, int>>[];
+    for (var i = 0; i < 7; i++) {
+      if (counts[i] > 0) out.add(MapEntry(names[i], counts[i]));
+    }
+    return out;
+  }
+
+  int _uniqueStudents() =>
+      logs.map((l) => _logStr(l, 'student')).where((s) => s.isNotEmpty).toSet().length;
+
+  String _dateRange() {
+    if (logs.isEmpty) return '-';
+    final stamps = logs.map(_logTimestamp).toList()..sort();
+    return '${_dateKey(stamps.first)} to ${_dateKey(stamps.last)}';
+  }
+
+  bool _showLabelAt(int index, int total) {
+    if (total <= 0) return false;
+    final step = (total / 7).ceil().clamp(1, total);
+    return index % step == 0;
+  }
+
+  Widget _granularitySelector() {
+    return SizedBox(
+      width: double.infinity,
+      child: SegmentedButton<TimeGranularity>(
+        showSelectedIcon: false,
+        segments: TimeGranularity.values
+            .map((g) => ButtonSegment<TimeGranularity>(value: g, label: Text(g.label)))
+            .toList(),
+        selected: {_granularity},
+        onSelectionChanged: (selection) => setState(() => _granularity = selection.first),
+      ),
+    );
+  }
+
+  /// One reusable bar-chart card with a count table beneath it.
+  Widget _barCard(
+    BuildContext context, {
+    required String title,
+    required List<String> labels,
+    required List<int> counts,
+    String? caption,
+    bool thinLabels = false,
+  }) {
+    final theme = Theme.of(context);
+    if (labels.isEmpty) {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(14.0),
+          child: Text('$title — no data yet.',
+              style: theme.textTheme.bodyMedium?.copyWith(color: Colors.grey[700])),
+        ),
+      );
+    }
+    final maxCount = counts.reduce((a, b) => a > b ? a : b);
+    final n = labels.length;
+    final barWidth = n > 24 ? 6.0 : (n > 12 ? 10.0 : 18.0);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 16),
+            SizedBox(
+              height: 250,
+              child: BarChart(
+                BarChartData(
+                  alignment: BarChartAlignment.spaceAround,
+                  maxY: (maxCount.toDouble() + 2).ceilToDouble(),
+                  barTouchData: BarTouchData(enabled: true),
+                  titlesData: FlTitlesData(
+                    show: true,
+                    leftTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: true, reservedSize: 40),
+                    ),
+                    bottomTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        getTitlesWidget: (value, meta) {
+                          final i = value.toInt();
+                          if (i < 0 || i >= labels.length) return const Text('');
+                          if (thinLabels && !_showLabelAt(i, labels.length)) return const Text('');
+                          final lab = labels[i];
+                          return Transform.rotate(
+                            angle: -0.3,
+                            child: Text(
+                              lab.length > 12 ? '${lab.substring(0, 12)}...' : lab,
+                              style: const TextStyle(fontSize: 9),
+                              textAlign: TextAlign.center,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          );
+                        },
+                        reservedSize: 70,
+                      ),
+                    ),
+                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  ),
+                  gridData: const FlGridData(show: true, drawHorizontalLine: true, drawVerticalLine: false),
+                  barGroups: List.generate(
+                    labels.length,
+                    (i) => BarChartGroupData(
+                      x: i,
+                      barRods: [BarChartRodData(toY: counts[i].toDouble(), color: Colors.indigo, width: barWidth)],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            if (caption != null)
+              Text(caption, style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[700])),
+            const SizedBox(height: 8),
+            ...List.generate(
+              labels.length,
+              (i) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(child: Text(labels[i], style: theme.textTheme.bodySmall)),
+                    Text(counts[i].toString(),
+                        style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _buildSchoolPrompt() {
+    final buf = StringBuffer();
+    buf.writeln('School-wide aggregated ABC data (de-identified; counts across all students).');
+    buf.writeln('Total events: ${logs.length}');
+    buf.writeln('Students with data: ${_uniqueStudents()}');
+    buf.writeln('Date range: ${_dateRange()}');
+    buf.writeln();
+    void section(String title, List<MapEntry<String, int>> entries) {
+      buf.writeln('$title:');
+      if (entries.isEmpty) {
+        buf.writeln('- none recorded');
+      } else {
+        for (final e in entries) {
+          buf.writeln('- ${e.key}: ${e.value}');
+        }
+      }
+      buf.writeln();
+    }
+    section('Behavior frequency', _sortedDesc(_countBy('behavior')));
+    section('Antecedent frequency', _sortedDesc(_countBy('antecedent')));
+    section('Consequence frequency', _sortedDesc(_countBy('consequence')));
+    section('Frequency by school period', _sortedDesc(_countBy('period')));
+    section('Frequency by day of week', _countsByWeekday());
+    buf.writeln('Events per ${_granularity.unit} (${_granularity.label}):');
+    for (final e in _eventCountsByBucket()) {
+      buf.writeln('- ${e.key}: ${e.value}');
+    }
+    buf.writeln();
+    return buf.toString();
+  }
+
+  void _openSchoolAi() {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => StudentAiAnalysisScreen(
+        student: 'School',
+        apiKey: widget.apiKey,
+        title: 'School AI Analysis',
+        systemPromptOverride: _schoolSystemPrompt,
+        userPrompt: _buildSchoolPrompt(),
+      ),
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    if (logs.isEmpty) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('School Dashboard')),
+        body: const Center(child: Text('No behavior data yet.')),
+      );
+    }
+    final behavior = _sortedDesc(_countBy('behavior'));
+    final period = _sortedDesc(_countBy('period'));
+    final bucket = _eventCountsByBucket();
+    final weekday = _countsByWeekday();
+    Widget heading(String t) => Padding(
+          padding: const EdgeInsets.only(top: 24, bottom: 12),
+          child: Text(t, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+        );
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('School Dashboard'),
+        actions: [
+          if (kAiFeaturesEnabled)
+            IconButton(
+              icon: const Icon(Icons.psychology),
+              tooltip: 'AI school analysis',
+              onPressed: _openSchoolAi,
+            ),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16.0),
+        children: [
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('School-wide overview',
+                      style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  Text('Total events: ${logs.length}'),
+                  Text('Students with data: ${_uniqueStudents()}'),
+                  Text('Date range: ${_dateRange()}'),
+                ],
+              ),
+            ),
+          ),
+          heading('Behaviors over time (all students)'),
+          _granularitySelector(),
+          const SizedBox(height: 16),
+          _barCard(context,
+              title: '${_granularity.label} behavior frequency',
+              labels: bucket.map((e) => _bucketLabel(e.key, _granularity)).toList(),
+              counts: bucket.map((e) => e.value).toList(),
+              caption: 'Events per ${_granularity.unit}',
+              thinLabels: true),
+          heading('Which behaviors are occurring'),
+          _barCard(context,
+              title: 'Behavior frequency',
+              labels: behavior.map((e) => e.key).toList(),
+              counts: behavior.map((e) => e.value).toList(),
+              caption: 'Total occurrences by behavior'),
+          heading('By school period'),
+          _barCard(context,
+              title: 'Behaviors by period',
+              labels: period.map((e) => e.key).toList(),
+              counts: period.map((e) => e.value).toList(),
+              caption: 'Events per period (most frequent first)'),
+          heading('By day of week'),
+          _barCard(context,
+              title: 'Behaviors by day of week',
+              labels: weekday.map((e) => e.key).toList(),
+              counts: weekday.map((e) => e.value).toList(),
+              caption: 'Events per weekday'),
+          const SizedBox(height: 24),
+        ],
+      ),
     );
   }
 }
