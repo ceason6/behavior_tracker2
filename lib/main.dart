@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v20';
+const String kBuildTag = 'v21';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -2640,6 +2640,19 @@ Be concise and base every statement on the provided data. If the data are insuff
     return out;
   }
 
+  /// Per-day behavior breakdown across all students: date -> {behavior: count}.
+  Map<String, Map<String, int>> _behaviorsByDate() {
+    final byDate = <String, Map<String, int>>{};
+    for (final log in logs) {
+      final date = _dateKey(_logTimestamp(log));
+      final b = _logStr(log, 'behavior');
+      final behavior = b.isNotEmpty ? b : 'Unspecified';
+      final day = byDate.putIfAbsent(date, () => <String, int>{});
+      day[behavior] = (day[behavior] ?? 0) + 1;
+    }
+    return byDate;
+  }
+
   int _uniqueStudents() =>
       logs.map((l) => _logStr(l, 'student')).where((s) => s.isNotEmpty).toSet().length;
 
@@ -2799,6 +2812,16 @@ Be concise and base every statement on the provided data. If the data are insuff
       buf.writeln('- ${e.key}: ${e.value}');
     }
     buf.writeln();
+    buf.writeln('Behaviors by day (date: behavior counts):');
+    final byDate = _behaviorsByDate();
+    final days = byDate.keys.toList()..sort((a, b) => b.compareTo(a));
+    for (final d in days) {
+      final parts = (byDate[d]!.entries.toList()..sort((a, b) => b.value.compareTo(a.value)))
+          .map((e) => '${e.key}: ${e.value}')
+          .join(', ');
+      buf.writeln('- $d -> $parts');
+    }
+    buf.writeln();
     return buf.toString();
   }
 
@@ -2827,6 +2850,8 @@ Be concise and base every statement on the provided data. If the data are insuff
     final period = _sortedDesc(_countBy('period'));
     final bucket = _eventCountsByBucket();
     final weekday = _countsByWeekday();
+    final byDate = _behaviorsByDate();
+    final byDateDays = byDate.keys.toList()..sort((a, b) => b.compareTo(a));
     Widget heading(String t) => Padding(
           padding: const EdgeInsets.only(top: 24, bottom: 12),
           child: Text(t, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
@@ -2890,6 +2915,34 @@ Be concise and base every statement on the provided data. If the data are insuff
               labels: weekday.map((e) => e.key).toList(),
               counts: weekday.map((e) => e.value).toList(),
               caption: 'Events per weekday'),
+          heading('Behaviors by day'),
+          for (final date in byDateDays)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(14.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(date,
+                        style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 8),
+                    for (final e in (byDate[date]!.entries.toList()
+                          ..sort((a, b) => b.value.compareTo(a.value))))
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2.0),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(child: Text(e.key, style: theme.textTheme.bodySmall)),
+                            Text(e.value.toString(),
+                                style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
           const SizedBox(height: 24),
         ],
       ),
