@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v21';
+const String kBuildTag = 'v22';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -886,6 +886,7 @@ ${buffer.toString()}''';
       builder: (context) => SchoolDashboardScreen(
         allLogs: List.of(_savedLogs),
         apiKey: apiKey ?? '',
+        periodOrder: periods,
       ),
     ));
   }
@@ -2584,8 +2585,15 @@ Be concise and practical, and base every statement on the provided data. If the 
 class SchoolDashboardScreen extends StatefulWidget {
   final List<Map<String, dynamic>> allLogs;
   final String apiKey;
+  // Canonical school-period order (so the period heatmap reads in schedule order).
+  final List<String> periodOrder;
 
-  const SchoolDashboardScreen({super.key, required this.allLogs, required this.apiKey});
+  const SchoolDashboardScreen({
+    super.key,
+    required this.allLogs,
+    required this.apiKey,
+    this.periodOrder = const [],
+  });
 
   @override
   State<SchoolDashboardScreen> createState() => _SchoolDashboardScreenState();
@@ -2655,6 +2663,60 @@ Be concise and base every statement on the provided data. If the data are insuff
 
   int _uniqueStudents() =>
       logs.map((l) => _logStr(l, 'student')).where((s) => s.isNotEmpty).toSet().length;
+
+  // Distinct, readable colors assigned to behaviors (stable, by overall rank).
+  static const List<Color> _palette = [
+    Color(0xFF3949AB), Color(0xFFE53935), Color(0xFF43A047), Color(0xFFFB8C00),
+    Color(0xFF8E24AA), Color(0xFF00ACC1), Color(0xFFC0CA33), Color(0xFF6D4C41),
+    Color(0xFFEC407A), Color(0xFF26A69A), Color(0xFF5E35B1), Color(0xFF757575),
+  ];
+
+  /// behavior -> color, ordered by overall frequency so the biggest behaviors
+  /// get the most distinct hues.
+  Map<String, Color> _behaviorColors() {
+    final ordered = _sortedDesc(_countBy('behavior')).map((e) => e.key).toList();
+    final map = <String, Color>{};
+    for (var i = 0; i < ordered.length; i++) {
+      map[ordered[i]] = _palette[i % _palette.length];
+    }
+    return map;
+  }
+
+  /// bucket -> behavior -> count, at the current granularity.
+  Map<String, Map<String, int>> _bucketBehaviorCounts() {
+    final m = <String, Map<String, int>>{};
+    for (final log in logs) {
+      final k = _bucketKey(_logTimestamp(log), _granularity);
+      final b = _logStr(log, 'behavior');
+      final behavior = b.isNotEmpty ? b : 'Unspecified';
+      final bucket = m.putIfAbsent(k, () => <String, int>{});
+      bucket[behavior] = (bucket[behavior] ?? 0) + 1;
+    }
+    return m;
+  }
+
+  /// behavior -> {category -> count}, where category is read from [key]
+  /// (e.g. 'period') or, when [key] is 'weekday', the day of week.
+  Map<String, Map<String, int>> _behaviorBy(String key) {
+    final m = <String, Map<String, int>>{};
+    const names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    for (final log in logs) {
+      final b = _logStr(log, 'behavior');
+      final behavior = b.isNotEmpty ? b : 'Unspecified';
+      final String cat;
+      if (key == 'weekday') {
+        cat = names[_logTimestamp(log).toLocal().weekday - 1];
+      } else if (key == 'date') {
+        cat = _dateKey(_logTimestamp(log));
+      } else {
+        final v = _logStr(log, key);
+        cat = v.isNotEmpty ? v : 'Unspecified';
+      }
+      final row = m.putIfAbsent(behavior, () => <String, int>{});
+      row[cat] = (row[cat] ?? 0) + 1;
+    }
+    return m;
+  }
 
   String _dateRange() {
     if (logs.isEmpty) return '-';
@@ -2784,6 +2846,212 @@ Be concise and base every statement on the provided data. If the data are insuff
     );
   }
 
+  Widget _legend(Map<String, Color> colors) {
+    return Wrap(
+      spacing: 12,
+      runSpacing: 6,
+      children: colors.entries
+          .map((e) => Row(mainAxisSize: MainAxisSize.min, children: [
+                Container(
+                    width: 12,
+                    height: 12,
+                    decoration: BoxDecoration(color: e.value, borderRadius: BorderRadius.circular(2))),
+                const SizedBox(width: 4),
+                Text(e.key, style: const TextStyle(fontSize: 11)),
+              ]))
+          .toList(),
+    );
+  }
+
+  /// Stacked bar chart: one bar per time bucket, segmented (and colored) by
+  /// behavior, so volume, composition, and trend are all visible at once.
+  Widget _buildStackedTimeChart(BuildContext context, Map<String, Color> colors) {
+    final byBucket = _bucketBehaviorCounts();
+    final keys = byBucket.keys.toList()..sort();
+    if (keys.isEmpty) return const SizedBox.shrink();
+    final behaviors = colors.keys.toList();
+    double maxTotal = 0;
+    for (final k in keys) {
+      final t = byBucket[k]!.values.fold<int>(0, (s, v) => s + v).toDouble();
+      if (t > maxTotal) maxTotal = t;
+    }
+    final theme = Theme.of(context);
+    final n = keys.length;
+    final barWidth = n > 24 ? 8.0 : (n > 12 ? 12.0 : 20.0);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('${_granularity.label} behaviors (stacked by type)',
+                style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 16),
+            SizedBox(
+              height: 260,
+              child: BarChart(
+                BarChartData(
+                  alignment: BarChartAlignment.spaceAround,
+                  maxY: (maxTotal + 2).ceilToDouble(),
+                  barTouchData: BarTouchData(enabled: true),
+                  titlesData: FlTitlesData(
+                    show: true,
+                    leftTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: true, reservedSize: 40),
+                    ),
+                    bottomTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        getTitlesWidget: (value, meta) {
+                          final i = value.toInt();
+                          if (i < 0 || i >= keys.length || !_showLabelAt(i, keys.length)) {
+                            return const Text('');
+                          }
+                          return Transform.rotate(
+                            angle: -0.3,
+                            child: Text(_bucketLabel(keys[i], _granularity),
+                                style: const TextStyle(fontSize: 9), textAlign: TextAlign.center),
+                          );
+                        },
+                        reservedSize: 44,
+                      ),
+                    ),
+                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  ),
+                  gridData: const FlGridData(show: true, drawHorizontalLine: true, drawVerticalLine: false),
+                  barGroups: List.generate(keys.length, (i) {
+                    final counts = byBucket[keys[i]]!;
+                    double from = 0;
+                    final stack = <BarChartRodStackItem>[];
+                    for (final b in behaviors) {
+                      final c = (counts[b] ?? 0).toDouble();
+                      if (c <= 0) continue;
+                      stack.add(BarChartRodStackItem(from, from + c, colors[b]!));
+                      from += c;
+                    }
+                    return BarChartGroupData(
+                      x: i,
+                      barRods: [
+                        BarChartRodData(
+                          toY: from,
+                          width: barWidth,
+                          color: Colors.transparent,
+                          borderRadius: BorderRadius.zero,
+                          rodStackItems: stack,
+                        ),
+                      ],
+                    );
+                  }),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            _legend(colors),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// A colored grid: [rows] down the side, [cols] across the top, cell color
+  /// intensity scaled to [valueAt]. Best view for spotting hotspots.
+  Widget _heatmap(
+    BuildContext context, {
+    required String title,
+    required List<String> rows,
+    required List<String> cols,
+    required int Function(String row, String col) valueAt,
+  }) {
+    final theme = Theme.of(context);
+    if (rows.isEmpty || cols.isEmpty) {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(14.0),
+          child: Text('$title — no data yet.',
+              style: theme.textTheme.bodyMedium?.copyWith(color: Colors.grey[700])),
+        ),
+      );
+    }
+    var maxV = 0;
+    for (final r in rows) {
+      for (final c in cols) {
+        final v = valueAt(r, c);
+        if (v > maxV) maxV = v;
+      }
+    }
+    Color cellColor(int v) {
+      if (v <= 0) return const Color(0xFFF5F5F5);
+      final t = (v / (maxV == 0 ? 1 : maxV)).clamp(0.18, 1.0);
+      return Color.lerp(const Color(0xFFE8EAF6), const Color(0xFF1A237E), t)!;
+    }
+
+    const cellW = 48.0, cellH = 34.0, rowLabelW = 130.0;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 4),
+            Text('Darker = more frequent',
+                style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[600])),
+            const SizedBox(height: 12),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    const SizedBox(width: rowLabelW),
+                    ...cols.map((c) => SizedBox(
+                          width: cellW,
+                          height: cellH,
+                          child: Center(
+                            child: Text(c,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700)),
+                          ),
+                        )),
+                  ]),
+                  ...rows.map((r) => Row(children: [
+                        SizedBox(
+                          width: rowLabelW,
+                          child: Padding(
+                            padding: const EdgeInsets.only(right: 6.0),
+                            child: Text(r,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 11)),
+                          ),
+                        ),
+                        ...cols.map((c) {
+                          final v = valueAt(r, c);
+                          final bg = cellColor(v);
+                          final fg = bg.computeLuminance() < 0.5 ? Colors.white : Colors.black87;
+                          return Container(
+                            width: cellW - 2,
+                            height: cellH - 2,
+                            margin: const EdgeInsets.all(1),
+                            alignment: Alignment.center,
+                            color: bg,
+                            child: Text(v > 0 ? '$v' : '',
+                                style: TextStyle(fontSize: 11, color: fg, fontWeight: FontWeight.w600)),
+                          );
+                        }),
+                      ])),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   String _buildSchoolPrompt() {
     final buf = StringBuffer();
     buf.writeln('School-wide aggregated ABC data (de-identified; counts across all students).');
@@ -2846,12 +3114,25 @@ Be concise and base every statement on the provided data. If the data are insuff
         body: const Center(child: Text('No behavior data yet.')),
       );
     }
-    final behavior = _sortedDesc(_countBy('behavior'));
-    final period = _sortedDesc(_countBy('period'));
-    final bucket = _eventCountsByBucket();
-    final weekday = _countsByWeekday();
-    final byDate = _behaviorsByDate();
-    final byDateDays = byDate.keys.toList()..sort((a, b) => b.compareTo(a));
+    final colors = _behaviorColors();
+    final behaviorRows = colors.keys.toList();
+    final behaviorTotals = _sortedDesc(_countBy('behavior'));
+
+    final periodMap = _behaviorBy('period');
+    final presentPeriods = <String>{for (final m in periodMap.values) ...m.keys};
+    final periodCols = [
+      ...widget.periodOrder.where(presentPeriods.contains),
+      ...presentPeriods.where((p) => !widget.periodOrder.contains(p)),
+    ];
+
+    final weekdayMap = _behaviorBy('weekday');
+    const wdOrder = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    final presentWd = <String>{for (final m in weekdayMap.values) ...m.keys};
+    final weekdayCols = wdOrder.where(presentWd.contains).toList();
+
+    final dateMap = _behaviorBy('date');
+    final dateCols = (<String>{for (final m in dateMap.values) ...m.keys}.toList())..sort();
+
     Widget heading(String t) => Padding(
           padding: const EdgeInsets.only(top: 24, bottom: 12),
           child: Text(t, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
@@ -2891,58 +3172,31 @@ Be concise and base every statement on the provided data. If the data are insuff
           heading('Behaviors over time (all students)'),
           _granularitySelector(),
           const SizedBox(height: 16),
-          _barCard(context,
-              title: '${_granularity.label} behavior frequency',
-              labels: bucket.map((e) => _bucketLabel(e.key, _granularity)).toList(),
-              counts: bucket.map((e) => e.value).toList(),
-              caption: 'Events per ${_granularity.unit}',
-              thinLabels: true),
+          _buildStackedTimeChart(context, colors),
           heading('Which behaviors are occurring'),
           _barCard(context,
               title: 'Behavior frequency',
-              labels: behavior.map((e) => e.key).toList(),
-              counts: behavior.map((e) => e.value).toList(),
+              labels: behaviorTotals.map((e) => e.key).toList(),
+              counts: behaviorTotals.map((e) => e.value).toList(),
               caption: 'Total occurrences by behavior'),
           heading('By school period'),
-          _barCard(context,
-              title: 'Behaviors by period',
-              labels: period.map((e) => e.key).toList(),
-              counts: period.map((e) => e.value).toList(),
-              caption: 'Events per period (most frequent first)'),
+          _heatmap(context,
+              title: 'Behavior × period',
+              rows: behaviorRows,
+              cols: periodCols,
+              valueAt: (r, c) => periodMap[r]?[c] ?? 0),
           heading('By day of week'),
-          _barCard(context,
-              title: 'Behaviors by day of week',
-              labels: weekday.map((e) => e.key).toList(),
-              counts: weekday.map((e) => e.value).toList(),
-              caption: 'Events per weekday'),
+          _heatmap(context,
+              title: 'Behavior × day of week',
+              rows: behaviorRows,
+              cols: weekdayCols,
+              valueAt: (r, c) => weekdayMap[r]?[c] ?? 0),
           heading('Behaviors by day'),
-          for (final date in byDateDays)
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(14.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(date,
-                        style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 8),
-                    for (final e in (byDate[date]!.entries.toList()
-                          ..sort((a, b) => b.value.compareTo(a.value))))
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2.0),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Expanded(child: Text(e.key, style: theme.textTheme.bodySmall)),
-                            Text(e.value.toString(),
-                                style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
-                          ],
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ),
+          _heatmap(context,
+              title: 'Behavior × date',
+              rows: behaviorRows,
+              cols: dateCols,
+              valueAt: (r, c) => dateMap[r]?[c] ?? 0),
           const SizedBox(height: 24),
         ],
       ),
