@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v26';
+const String kBuildTag = 'v27';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -2721,12 +2721,7 @@ Be concise and base every statement on the provided data. If the data are insuff
   int _uniqueStudents() =>
       logs.map((l) => _logStr(l, 'student')).where((s) => s.isNotEmpty).toSet().length;
 
-  // Grayscale shades (copier/B&W friendly) cycled across behaviors, plus a
-  // matching symbol per behavior so they're identifiable in black-and-white.
-  static const List<Color> _grays = [
-    Color(0xFF1A1A1A), Color(0xFF8C8C8C), Color(0xFF4D4D4D), Color(0xFFBFBFBF),
-    Color(0xFF333333), Color(0xFF9E9E9E), Color(0xFF666666), Color(0xFFD6D6D6),
-  ];
+  // A symbol per behavior so they're identifiable even in black-and-white.
   static const List<String> _symbols = [
     '●', '■', '▲', '◆', '★', '✚', '▼', '◯', '□', '△', '▽', '✖',
   ];
@@ -2734,8 +2729,18 @@ Be concise and base every statement on the provided data. If the data are insuff
   /// Behaviors ordered by overall frequency (stable order for legend + bars).
   List<String> _behaviorOrder() => _sortedDesc(_countBy('behavior')).map((e) => e.key).toList();
 
-  Map<String, Color> _behaviorShades(List<String> order) =>
-      {for (var i = 0; i < order.length; i++) order[i]: _grays[i % _grays.length]};
+  /// Color per behavior on a red->blue gradient by frequency rank: the most
+  /// frequent behavior is red, cooling through orange/yellow/green to blue as
+  /// the counts decrease.
+  Map<String, Color> _behaviorColors(List<String> order) {
+    final map = <String, Color>{};
+    final n = order.length;
+    for (var i = 0; i < n; i++) {
+      final t = n <= 1 ? 0.0 : i / (n - 1);
+      map[order[i]] = HSVColor.fromAHSV(1.0, t * 240.0, 0.72, 0.88).toColor();
+    }
+    return map;
+  }
 
   Map<String, String> _behaviorSymbols(List<String> order) =>
       {for (var i = 0; i < order.length; i++) order[i]: _symbols[i % _symbols.length]};
@@ -2858,9 +2863,9 @@ Be concise and base every statement on the provided data. If the data are insuff
     );
   }
 
-  /// One reusable bar-chart card with a count table beneath it.
-  /// B&W-friendly legend: a grayscale swatch + a symbol + the behavior name.
-  Widget _legend(List<String> behaviors, Map<String, Color> shades, Map<String, String> symbols) {
+  /// Legend: a colored swatch (frequency gradient) with the behavior's symbol
+  /// overlaid (so it still reads in B&W) + the behavior name.
+  Widget _legend(List<String> behaviors, Map<String, Color> colors, Map<String, String> symbols) {
     return Wrap(
       spacing: 14,
       runSpacing: 6,
@@ -2871,14 +2876,14 @@ Be concise and base every statement on the provided data. If the data are insuff
                   height: 16,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    color: shades[b],
+                    color: colors[b],
                     border: Border.all(color: Colors.black26),
                     borderRadius: BorderRadius.circular(2),
                   ),
                   child: Text(symbols[b] ?? '',
                       style: TextStyle(
                           fontSize: 10,
-                          color: (shades[b] ?? Colors.grey).computeLuminance() < 0.5
+                          color: (colors[b] ?? Colors.grey).computeLuminance() < 0.5
                               ? Colors.white
                               : Colors.black)),
                 ),
@@ -2890,11 +2895,12 @@ Be concise and base every statement on the provided data. If the data are insuff
   }
 
   /// Grouped bar chart: each behavior is its own bar, placed side by side within
-  /// each time bucket. Grayscale fills (+ symbol legend) so it copies in B&W.
+  /// each time bucket. Colored by a frequency gradient (red = most), with a
+  /// symbol legend so it still reads in B&W.
   Widget _buildGroupedTimeChart(
     BuildContext context,
     List<String> behaviors,
-    Map<String, Color> shades,
+    Map<String, Color> colors,
     Map<String, String> symbols,
   ) {
     final byBucket = _bucketBehaviorCounts();
@@ -2986,7 +2992,7 @@ Be concise and base every statement on the provided data. If the data are insuff
                         for (final b in behaviors)
                           BarChartRodData(
                             toY: (counts[b] ?? 0).toDouble(),
-                            color: shades[b],
+                            color: colors[b],
                             width: rodW,
                             borderRadius: BorderRadius.zero,
                             borderSide: const BorderSide(color: Colors.black12, width: 0.3),
@@ -2998,7 +3004,7 @@ Be concise and base every statement on the provided data. If the data are insuff
               ),
             ),
             const SizedBox(height: 12),
-            _legend(behaviors, shades, symbols),
+            _legend(behaviors, colors, symbols),
           ],
         ),
       ),
@@ -3204,7 +3210,7 @@ Be concise and base every statement on the provided data. If the data are insuff
       );
     }
     final behaviorRows = _behaviorOrder();
-    final shades = _behaviorShades(behaviorRows);
+    final colors = _behaviorColors(behaviorRows);
     final symbols = _behaviorSymbols(behaviorRows);
     final behaviorTotals = _sortedDesc(_countBy('behavior'));
 
@@ -3294,7 +3300,7 @@ Be concise and base every statement on the provided data. If the data are insuff
                     children: [
                       _granularitySelector(),
                       const SizedBox(height: 16),
-                      _buildGroupedTimeChart(context, behaviorRows, shades, symbols),
+                      _buildGroupedTimeChart(context, behaviorRows, colors, symbols),
                     ],
                   ),
                   // Patterns: hotspot heatmaps.
