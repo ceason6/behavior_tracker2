@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v29';
+const String kBuildTag = 'v30';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -3104,7 +3104,9 @@ Be concise and base every statement on the provided data. If the data are insuff
                         isCurved: false,
                         color: studentColor[s],
                         barWidth: 2,
-                        dotData: const FlDotData(show: false),
+                        // Dots on so single-day ranges (Today/Yesterday) still
+                        // show a visible point per student, not a blank chart.
+                        dotData: const FlDotData(show: true),
                       ),
                   ],
                 ),
