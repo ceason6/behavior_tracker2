@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v38';
+const String kBuildTag = 'v39';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -2138,6 +2138,20 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
               height: 250,
               child: LineChart(
                 LineChartData(
+                  lineTouchData: LineTouchData(
+                    touchTooltipData: LineTouchTooltipData(
+                      getTooltipColor: (touchedSpot) => Colors.blueGrey.shade900,
+                      tooltipRoundedRadius: 8,
+                      getTooltipItems: (touchedSpots) => touchedSpots.map((s) {
+                        final i = s.x.toInt();
+                        final label = (i >= 0 && i < keys.length) ? keys[i] : '';
+                        return LineTooltipItem(
+                          '$label\n${s.y.toInt()}',
+                          const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13),
+                        );
+                      }).toList(),
+                    ),
+                  ),
                   gridData: const FlGridData(show: true, drawHorizontalLine: true, drawVerticalLine: false),
                   titlesData: FlTitlesData(
                     show: true,
@@ -2220,21 +2234,42 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
       wdCounts[k] = (wdCounts[k] ?? 0) + 1;
     }
     final highestDay = maxKey(wdCounts);
-    Widget statTile(String value, String label) => Card(
-          child: Container(
-            width: 158,
-            padding: const EdgeInsets.all(12.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(value,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 2),
-                Text(label, style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[700])),
-              ],
+    Widget statTile(String value, String label, Color color) => Container(
+          width: 168,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [color, Color.lerp(color, Colors.black, 0.18)!],
             ),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: color.withValues(alpha: 0.45),
+                blurRadius: 14,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(value,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800, color: Colors.white)),
+              const SizedBox(height: 4),
+              Text(label,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                      color: Colors.white.withValues(alpha: 0.92),
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.2)),
+            ],
           ),
         );
 
@@ -2249,7 +2284,9 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
             children: [
               Text(date, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
               const SizedBox(height: 6),
-              ...dateFrequency.entries.map((entry) => Padding(
+              ...(dateFrequency.entries.toList()
+                    ..sort((a, b) => b.value.compareTo(a.value)))
+                  .map((entry) => Padding(
                     padding: const EdgeInsets.symmetric(vertical: 1.0),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -2316,10 +2353,10 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
                   spacing: 8,
                   runSpacing: 8,
                   children: [
-                    statTile('${studentLogs.length}', 'Total events'),
-                    statTile(topBehavior, 'Top behavior'),
-                    statTile(peakPeriod, 'Peak Escalation Period'),
-                    statTile(highestDay, 'Highest Incident Day'),
+                    statTile('${studentLogs.length}', 'Total Events', const Color(0xFF3949AB)),
+                    statTile(topBehavior, 'Top Behavior', const Color(0xFF00897B)),
+                    statTile(peakPeriod, 'Peak Escalation Period', const Color(0xFFE65100)),
+                    statTile(highestDay, 'Highest Incident Day', const Color(0xFF6A1B9A)),
                   ],
                 ),
                 const SizedBox(height: 24),
@@ -3506,21 +3543,42 @@ Be concise and base every statement on the provided data. If the data are insuff
     final weekdayTotals = _countsByWeekday()..sort((a, b) => b.value.compareTo(a.value));
     final busiestDay = weekdayTotals.isNotEmpty ? weekdayTotals.first.key : '-';
 
-    Widget statTile(String value, String label) => Card(
-          child: Container(
-            width: 158,
-            padding: const EdgeInsets.all(12.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(value,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 2),
-                Text(label, style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[700])),
-              ],
+    Widget statTile(String value, String label, Color color) => Container(
+          width: 168,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [color, Color.lerp(color, Colors.black, 0.18)!],
             ),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: color.withValues(alpha: 0.45),
+                blurRadius: 14,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(value,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800, color: Colors.white)),
+              const SizedBox(height: 4),
+              Text(label,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                      color: Colors.white.withValues(alpha: 0.92),
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.2)),
+            ],
           ),
         );
 
@@ -3549,11 +3607,12 @@ Be concise and base every statement on the provided data. If the data are insuff
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  statTile('${logs.length}', 'Total events'),
+                  statTile('${logs.length}', 'Total Events', const Color(0xFF3949AB)),
                   statTile(topBehavior != null ? '${topBehavior.value}' : '-',
-                      topBehavior != null ? 'Top: ${topBehavior.key}' : 'Top behavior'),
-                  statTile(busiestPeriod, 'Peak Escalation Period'),
-                  statTile(busiestDay, 'Highest Incident Day'),
+                      topBehavior != null ? 'Top: ${topBehavior.key}' : 'Top Behavior',
+                      const Color(0xFF00897B)),
+                  statTile(busiestPeriod, 'Peak Escalation Period', const Color(0xFFE65100)),
+                  statTile(busiestDay, 'Highest Incident Day', const Color(0xFF6A1B9A)),
                 ],
               ),
             ),
