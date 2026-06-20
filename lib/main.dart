@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v27';
+const String kBuildTag = 'v28';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -2758,6 +2758,20 @@ Be concise and base every statement on the provided data. If the data are insuff
     return m;
   }
 
+  /// student -> {bucketKey -> count}, at the current granularity (for the
+  /// per-student trend overlay).
+  Map<String, Map<String, int>> _studentBucketCounts() {
+    final m = <String, Map<String, int>>{};
+    for (final log in logs) {
+      final s = _logStr(log, 'student');
+      final student = s.isNotEmpty ? s : 'Unspecified';
+      final k = _bucketKey(_logTimestamp(log), _granularity);
+      final byBucket = m.putIfAbsent(student, () => <String, int>{});
+      byBucket[k] = (byBucket[k] ?? 0) + 1;
+    }
+    return m;
+  }
+
   /// behavior -> {category -> count}, where category is read from [key]
   /// (e.g. 'period') or, when [key] is 'weekday', the day of week.
   Map<String, Map<String, int>> _behaviorBy(String key) {
@@ -3011,6 +3025,99 @@ Be concise and base every statement on the provided data. If the data are insuff
     );
   }
 
+  /// Line chart overlaying every student's event count per time bucket, so you
+  /// can compare students' trends at a glance (one colored line each).
+  Widget _buildStudentTrendOverlay(BuildContext context) {
+    final byStudent = _studentBucketCounts();
+    if (byStudent.isEmpty) return const SizedBox.shrink();
+    final keys = (<String>{for (final m in byStudent.values) ...m.keys}.toList())..sort();
+    if (keys.isEmpty) return const SizedBox.shrink();
+    final students = byStudent.keys.toList()..sort();
+    final theme = Theme.of(context);
+    final studentColor = <String, Color>{
+      for (var i = 0; i < students.length; i++)
+        students[i]: HSVColor.fromAHSV(1.0, (i * 360.0 / students.length) % 360.0, 0.65, 0.85).toColor(),
+    };
+    double maxY = 0;
+    for (final s in students) {
+      for (final k in keys) {
+        final v = (byStudent[s]![k] ?? 0).toDouble();
+        if (v > maxY) maxY = v;
+      }
+    }
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('All students — ${_granularity.label.toLowerCase()} trend',
+                style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 16),
+            SizedBox(
+              height: 260,
+              child: LineChart(
+                LineChartData(
+                  minY: 0,
+                  maxY: (maxY + 1).ceilToDouble(),
+                  gridData: const FlGridData(show: true, drawHorizontalLine: true, drawVerticalLine: false),
+                  titlesData: FlTitlesData(
+                    show: true,
+                    leftTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: true, reservedSize: 40),
+                    ),
+                    bottomTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        getTitlesWidget: (value, meta) {
+                          final i = value.toInt();
+                          if (i < 0 || i >= keys.length || !_showLabelAt(i, keys.length)) {
+                            return const Text('');
+                          }
+                          return Text(_bucketLabel(keys[i], _granularity),
+                              style: const TextStyle(fontSize: 9), textAlign: TextAlign.center);
+                        },
+                        reservedSize: 40,
+                      ),
+                    ),
+                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  ),
+                  borderData: FlBorderData(show: true),
+                  lineBarsData: [
+                    for (final s in students)
+                      LineChartBarData(
+                        spots: [
+                          for (var i = 0; i < keys.length; i++)
+                            FlSpot(i.toDouble(), (byStudent[s]![keys[i]] ?? 0).toDouble()),
+                        ],
+                        isCurved: false,
+                        color: studentColor[s],
+                        barWidth: 2,
+                        dotData: const FlDotData(show: false),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 14,
+              runSpacing: 6,
+              children: students
+                  .map((s) => Row(mainAxisSize: MainAxisSize.min, children: [
+                        Container(width: 14, height: 4, color: studentColor[s]),
+                        const SizedBox(width: 4),
+                        Text(s, style: const TextStyle(fontSize: 11)),
+                      ]))
+                  .toList(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   /// A grayscale grid (copier-friendly): [rows] down the side, [cols] across the
   /// top, cell shade scaled to [valueAt], with row/column/grand totals. Optional
   /// [rowSymbols] prefixes each row label with a B&W symbol.
@@ -3048,10 +3155,13 @@ Be concise and base every statement on the provided data. If the data are insuff
       grand += rt;
     }
     // Grayscale ramp: empty = white, low = light gray, high = near-black.
+    // Color gradient matching the Overview: high = red, low = blue (empty = white).
     Color cellColor(int v) {
       if (v <= 0) return Colors.white;
-      final t = (v / (maxV == 0 ? 1 : maxV)).clamp(0.15, 1.0);
-      return Color.lerp(const Color(0xFFEEEEEE), const Color(0xFF222222), t)!;
+      final t = (v / (maxV == 0 ? 1 : maxV)).clamp(0.0, 1.0);
+      final hue = (1 - t) * 240.0; // 240=blue (low) -> 0=red (high)
+      final sat = 0.30 + 0.55 * t; // paler for low counts
+      return HSVColor.fromAHSV(1.0, hue, sat, 0.96).toColor();
     }
 
     const cellW = 48.0, cellH = 34.0, rowLabelW = 140.0, totalW = 52.0;
@@ -3098,7 +3208,7 @@ Be concise and base every statement on the provided data. If the data are insuff
           children: [
             Text(title, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
             const SizedBox(height: 4),
-            Text('Darker = more frequent · Total column/row included',
+            Text('Red = more frequent · Total column/row included',
                 style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[600])),
             const SizedBox(height: 12),
             SingleChildScrollView(
@@ -3301,6 +3411,8 @@ Be concise and base every statement on the provided data. If the data are insuff
                       _granularitySelector(),
                       const SizedBox(height: 16),
                       _buildGroupedTimeChart(context, behaviorRows, colors, symbols),
+                      const SizedBox(height: 16),
+                      _buildStudentTrendOverlay(context),
                     ],
                   ),
                   // Patterns: hotspot heatmaps.
