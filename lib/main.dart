@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v28';
+const String kBuildTag = 'v29';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -2623,6 +2623,7 @@ class _SchoolDashboardScreenState extends State<SchoolDashboardScreen> {
   TimeGranularity _granularity = TimeGranularity.daily;
   _RangePreset _range = _RangePreset.yearToDate;
   DateTimeRange? _customRange;
+  bool _bw = false; // B&W (print-friendly) mode: grayscale instead of color.
 
   /// Start/end (inclusive) of the currently selected date filter.
   (DateTime, DateTime) _rangeBounds() {
@@ -2737,7 +2738,9 @@ Be concise and base every statement on the provided data. If the data are insuff
     final n = order.length;
     for (var i = 0; i < n; i++) {
       final t = n <= 1 ? 0.0 : i / (n - 1);
-      map[order[i]] = HSVColor.fromAHSV(1.0, t * 240.0, 0.72, 0.88).toColor();
+      map[order[i]] = _bw
+          ? Color.lerp(const Color(0xFF222222), const Color(0xFFBDBDBD), t)!
+          : HSVColor.fromAHSV(1.0, t * 240.0, 0.72, 0.88).toColor();
     }
     return map;
   }
@@ -2872,6 +2875,13 @@ Be concise and base every statement on the provided data. If the data are insuff
               overflow: TextOverflow.ellipsis,
             ),
           ),
+        ),
+        const SizedBox(width: 8),
+        FilterChip(
+          label: const Text('B&W'),
+          tooltip: 'Grayscale for black-and-white printing',
+          selected: _bw,
+          onSelected: (v) => setState(() => _bw = v),
         ),
       ],
     );
@@ -3155,10 +3165,15 @@ Be concise and base every statement on the provided data. If the data are insuff
       grand += rt;
     }
     // Grayscale ramp: empty = white, low = light gray, high = near-black.
-    // Color gradient matching the Overview: high = red, low = blue (empty = white).
+    // Color gradient matching the Overview: high = red, low = blue (empty =
+    // white). In B&W mode, a grayscale ramp instead (copier-friendly).
     Color cellColor(int v) {
       if (v <= 0) return Colors.white;
       final t = (v / (maxV == 0 ? 1 : maxV)).clamp(0.0, 1.0);
+      if (_bw) {
+        return Color.lerp(const Color(0xFFEEEEEE), const Color(0xFF222222),
+            t.clamp(0.15, 1.0))!;
+      }
       final hue = (1 - t) * 240.0; // 240=blue (low) -> 0=red (high)
       final sat = 0.30 + 0.55 * t; // paler for low counts
       return HSVColor.fromAHSV(1.0, hue, sat, 0.96).toColor();
@@ -3208,7 +3223,7 @@ Be concise and base every statement on the provided data. If the data are insuff
           children: [
             Text(title, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
             const SizedBox(height: 4),
-            Text('Red = more frequent · Total column/row included',
+            Text('${_bw ? 'Darker' : 'Red'} = more frequent · Total column/row included',
                 style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[600])),
             const SizedBox(height: 12),
             SingleChildScrollView(
