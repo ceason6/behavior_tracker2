@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v30';
+const String kBuildTag = 'v31';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -1515,13 +1515,10 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 2.0),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Expanded(child: Text('Strategy', style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600))),
-                  const SizedBox(width: 16),
-                  Text('Count', style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
-                  const SizedBox(width: 24),
-                  Text('Share', style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+                  SizedBox(width: 56, child: Text('Count', textAlign: TextAlign.right, style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600))),
+                  SizedBox(width: 72, child: Text('Share', textAlign: TextAlign.right, style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600))),
                 ],
               ),
             ),
@@ -1531,13 +1528,10 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
               return Padding(
                 padding: const EdgeInsets.symmetric(vertical: 2.0),
                 child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Expanded(child: Text(entry.key, style: labelStyle)),
-                    const SizedBox(width: 16),
-                    Text(entry.value.toString(), style: subtitleStyle),
-                    const SizedBox(width: 24),
-                    Text('${share.toStringAsFixed(1)}%', style: subtitleStyle),
+                    SizedBox(width: 56, child: Text(entry.value.toString(), textAlign: TextAlign.right, style: subtitleStyle)),
+                    SizedBox(width: 72, child: Text('${share.toStringAsFixed(1)}%', textAlign: TextAlign.right, style: subtitleStyle)),
                   ],
                 ),
               );
@@ -2203,13 +2197,10 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
                                 Padding(
                                   padding: const EdgeInsets.symmetric(vertical: 2.0),
                                   child: Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                     children: [
                                       Expanded(child: Text('Behavior', style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600))),
-                                      const SizedBox(width: 16),
-                                      Text('Count', style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
-                                      const SizedBox(width: 24),
-                                      Text('Share', style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+                                      SizedBox(width: 56, child: Text('Count', textAlign: TextAlign.right, style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600))),
+                                      SizedBox(width: 72, child: Text('Share', textAlign: TextAlign.right, style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600))),
                                     ],
                                   ),
                                 ),
@@ -2219,13 +2210,10 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
                                   return Padding(
                                     padding: const EdgeInsets.symmetric(vertical: 2.0),
                                     child: Row(
-                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                       children: [
                                         Expanded(child: Text(entry.key, style: frequencyLabelStyle)),
-                                        const SizedBox(width: 16),
-                                        Text(entry.value.toString(), style: subtitleStyle),
-                                        const SizedBox(width: 24),
-                                        Text('${share.toStringAsFixed(1)}%', style: subtitleStyle),
+                                        SizedBox(width: 56, child: Text(entry.value.toString(), textAlign: TextAlign.right, style: subtitleStyle)),
+                                        SizedBox(width: 72, child: Text('${share.toStringAsFixed(1)}%', textAlign: TextAlign.right, style: subtitleStyle)),
                                       ],
                                     ),
                                   );
