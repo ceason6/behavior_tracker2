@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v32';
+const String kBuildTag = 'v33';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -1503,6 +1503,7 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
 
     final entries = frequency.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
     final total = entries.fold<int>(0, (sum, e) => sum + e.value);
+    final maxStrategy = entries.isEmpty ? 0 : entries.first.value;
 
     return Card(
       child: Padding(
@@ -1525,13 +1526,16 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
             const Divider(),
             ...entries.map((entry) {
               final share = total > 0 ? (entry.value / total) * 100 : 0.0;
+              final isTop = entry.value == maxStrategy && maxStrategy > 0;
+              final rowLabel = isTop ? labelStyle?.copyWith(color: Colors.red, fontWeight: FontWeight.w700) : labelStyle;
+              final rowNum = isTop ? subtitleStyle?.copyWith(color: Colors.red, fontWeight: FontWeight.w700) : subtitleStyle;
               return Padding(
                 padding: const EdgeInsets.symmetric(vertical: 2.0),
                 child: Row(
                   children: [
-                    Expanded(child: Text(entry.key, style: labelStyle)),
-                    SizedBox(width: 56, child: Text(entry.value.toString(), textAlign: TextAlign.right, style: subtitleStyle)),
-                    SizedBox(width: 72, child: Text('${share.toStringAsFixed(1)}%', textAlign: TextAlign.right, style: subtitleStyle)),
+                    Expanded(child: Text(entry.key, style: rowLabel)),
+                    SizedBox(width: 56, child: Text(entry.value.toString(), textAlign: TextAlign.right, style: rowNum)),
+                    SizedBox(width: 72, child: Text('${share.toStringAsFixed(1)}%', textAlign: TextAlign.right, style: rowNum)),
                   ],
                 ),
               );
@@ -2205,21 +2209,31 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
                                   ),
                                 ),
                                 const Divider(),
-                                ...(overallFrequency.entries.toList()
-                                      ..sort((a, b) => b.value.compareTo(a.value)))
-                                    .map((entry) {
-                                  final share = totalCount > 0 ? (entry.value / totalCount) * 100 : 0.0;
-                                  return Padding(
-                                    padding: const EdgeInsets.symmetric(vertical: 2.0),
-                                    child: Row(
-                                      children: [
-                                        Expanded(child: Text(entry.key, style: frequencyLabelStyle)),
-                                        SizedBox(width: 56, child: Text(entry.value.toString(), textAlign: TextAlign.right, style: subtitleStyle)),
-                                        SizedBox(width: 72, child: Text('${share.toStringAsFixed(1)}%', textAlign: TextAlign.right, style: subtitleStyle)),
-                                      ],
-                                    ),
-                                  );
-                                }),
+                                ...(() {
+                                  final sorted = overallFrequency.entries.toList()
+                                    ..sort((a, b) => b.value.compareTo(a.value));
+                                  final maxCount = sorted.isEmpty ? 0 : sorted.first.value;
+                                  return sorted.map((entry) {
+                                    final share = totalCount > 0 ? (entry.value / totalCount) * 100 : 0.0;
+                                    final isTop = entry.value == maxCount && maxCount > 0;
+                                    final labelStyle = isTop
+                                        ? frequencyLabelStyle?.copyWith(color: Colors.red, fontWeight: FontWeight.w700)
+                                        : frequencyLabelStyle;
+                                    final numStyle = isTop
+                                        ? subtitleStyle?.copyWith(color: Colors.red, fontWeight: FontWeight.w700)
+                                        : subtitleStyle;
+                                    return Padding(
+                                      padding: const EdgeInsets.symmetric(vertical: 2.0),
+                                      child: Row(
+                                        children: [
+                                          Expanded(child: Text(entry.key, style: labelStyle)),
+                                          SizedBox(width: 56, child: Text(entry.value.toString(), textAlign: TextAlign.right, style: numStyle)),
+                                          SizedBox(width: 72, child: Text('${share.toStringAsFixed(1)}%', textAlign: TextAlign.right, style: numStyle)),
+                                        ],
+                                      ),
+                                    );
+                                  });
+                                })(),
                                 const SizedBox(height: 12),
                                 Text('Total events: $totalCount', style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[700])),
                               ],
