@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v37';
+const String kBuildTag = 'v38';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -1523,8 +1523,9 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 2.0),
               child: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Expanded(child: Text('Strategy', style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600))),
+                  SizedBox(width: 190, child: Text('Strategy', style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600))),
                   SizedBox(width: 56, child: Text('Count', textAlign: TextAlign.right, style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600))),
                   SizedBox(width: 72, child: Text('Share', textAlign: TextAlign.right, style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600))),
                 ],
@@ -1539,8 +1540,9 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
               return Padding(
                 padding: const EdgeInsets.symmetric(vertical: 1.0),
                 child: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Expanded(child: Text(entry.key, style: rowLabel)),
+                    SizedBox(width: 190, child: Text(entry.key, maxLines: 2, overflow: TextOverflow.ellipsis, style: rowLabel)),
                     SizedBox(width: 56, child: Text(entry.value.toString(), textAlign: TextAlign.right, style: rowNum)),
                     SizedBox(width: 72, child: Text('${share.toStringAsFixed(1)}%', textAlign: TextAlign.right, style: rowNum)),
                   ],
@@ -2066,7 +2068,7 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
                         showTitles: true,
                         getTitlesWidget: (value, meta) {
                           final index = value.toInt();
-                          if (index < 0 || index >= keys.length || !_showLabelAt(index, keys.length)) {
+                          if (index < 0 || index >= keys.length || (keys.length > 16 && !_showLabelAt(index, keys.length))) {
                             return const Text('');
                           }
                           return Transform.rotate(
@@ -2147,7 +2149,7 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
                         showTitles: true,
                         getTitlesWidget: (value, meta) {
                           final index = value.toInt();
-                          if (index < 0 || index >= keys.length || !_showLabelAt(index, keys.length)) {
+                          if (index < 0 || index >= keys.length || (keys.length > 16 && !_showLabelAt(index, keys.length))) {
                             return const Text('');
                           }
                           return Text(
@@ -2237,36 +2239,48 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
         );
 
     // Daily count table (reused; shown right after the stat tiles).
-    final dailyWidgets = <Widget>[
-      Text('Daily Behavior Frequency',
+    Widget dayCard(String date) {
+      final dateFrequency = frequency[date]!;
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(10.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(date, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 6),
+              ...dateFrequency.entries.map((entry) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 1.0),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(child: Text(entry.key, style: frequencyLabelStyle)),
+                        const SizedBox(width: 16),
+                        Text(entry.value.toString(), style: subtitleStyle),
+                      ],
+                    ),
+                  )),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // dates is sorted most-recent-first.
+    final dailyRecent = <Widget>[
+      Text('Daily Behavior Frequency — most recent day',
           style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
       const SizedBox(height: 12),
-      ...dates.map((date) {
-        final dateFrequency = frequency[date]!;
-        return Card(
-          child: Padding(
-            padding: const EdgeInsets.all(10.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(date, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
-                const SizedBox(height: 6),
-                ...dateFrequency.entries.map((entry) => Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 1.0),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Expanded(child: Text(entry.key, style: frequencyLabelStyle)),
-                          const SizedBox(width: 16),
-                          Text(entry.value.toString(), style: subtitleStyle),
-                        ],
-                      ),
-                    )),
-              ],
-            ),
-          ),
-        );
-      }),
+      if (dates.isNotEmpty) dayCard(dates.first),
+    ];
+    final dailyOlder = <Widget>[
+      if (dates.length > 1) ...[
+        Text('Daily Behavior Frequency — earlier days',
+            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 12),
+        ...dates.skip(1).map(dayCard),
+        const SizedBox(height: 24),
+      ],
     ];
 
     return Scaffold(
@@ -2309,7 +2323,7 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
                   ],
                 ),
                 const SizedBox(height: 24),
-                ...dailyWidgets,
+                ...dailyRecent,
                 const SizedBox(height: 24),
                 Text('Overall Behavior Summary', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 12),
@@ -2329,8 +2343,9 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
                                 Padding(
                                   padding: const EdgeInsets.symmetric(vertical: 2.0),
                                   child: Row(
+                                    mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Expanded(child: Text('Behavior', style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600))),
+                                      SizedBox(width: 190, child: Text('Behavior', style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600))),
                                       SizedBox(width: 56, child: Text('Count', textAlign: TextAlign.right, style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600))),
                                       SizedBox(width: 72, child: Text('Share', textAlign: TextAlign.right, style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600))),
                                     ],
@@ -2353,8 +2368,9 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
                                     return Padding(
                                       padding: const EdgeInsets.symmetric(vertical: 1.0),
                                       child: Row(
+                                        mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          Expanded(child: Text(entry.key, style: labelStyle)),
+                                          SizedBox(width: 190, child: Text(entry.key, maxLines: 2, overflow: TextOverflow.ellipsis, style: labelStyle)),
                                           SizedBox(width: 56, child: Text(entry.value.toString(), textAlign: TextAlign.right, style: numStyle)),
                                           SizedBox(width: 72, child: Text('${share.toStringAsFixed(1)}%', textAlign: TextAlign.right, style: numStyle)),
                                         ],
@@ -2387,6 +2403,7 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
                 const SizedBox(height: 24),
                 _buildAggregateTrendChart(context),
                 const SizedBox(height: 24),
+                ...dailyOlder,
                 Text('Detailed Logs', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 12),
                 ...studentLogs.map((log) {
