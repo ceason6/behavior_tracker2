@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v31';
+const String kBuildTag = 'v32';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -1501,7 +1501,7 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
       );
     }
 
-    final entries = frequency.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
+    final entries = frequency.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
     final total = entries.fold<int>(0, (sum, e) => sum + e.value);
 
     return Card(
@@ -1568,7 +1568,7 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
     final totalEvents = overall.values.fold<int>(0, (s, v) => s + v);
 
     final strategies = _buildProactiveStrategyFrequency();
-    final strategyEntries = strategies.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
+    final strategyEntries = strategies.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
     final totalStrategies = strategies.values.fold<int>(0, (s, v) => s + v);
 
     final byPeriod = _buildFrequencyByPeriod();
@@ -2205,7 +2205,9 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
                                   ),
                                 ),
                                 const Divider(),
-                                ...overallFrequency.entries.map((entry) {
+                                ...(overallFrequency.entries.toList()
+                                      ..sort((a, b) => b.value.compareTo(a.value)))
+                                    .map((entry) {
                                   final share = totalCount > 0 ? (entry.value / totalCount) * 100 : 0.0;
                                   return Padding(
                                     padding: const EdgeInsets.symmetric(vertical: 2.0),
