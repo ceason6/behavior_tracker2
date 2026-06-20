@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v25';
+const String kBuildTag = 'v26';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -2928,7 +2928,29 @@ Be concise and base every statement on the provided data. If the data are insuff
                 BarChartData(
                   alignment: BarChartAlignment.spaceAround,
                   maxY: (maxV + 1).ceilToDouble(),
-                  barTouchData: BarTouchData(enabled: true),
+                  barTouchData: BarTouchData(
+                    enabled: true,
+                    touchTooltipData: BarTouchTooltipData(
+                      getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                        if (rod.toY <= 0) return null;
+                        final behavior =
+                            (rodIndex >= 0 && rodIndex < behaviors.length) ? behaviors[rodIndex] : '';
+                        final bucket = (group.x >= 0 && group.x < keys.length)
+                            ? _bucketLabel(keys[group.x], _granularity)
+                            : '';
+                        return BarTooltipItem(
+                          '$behavior\n',
+                          const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                          children: [
+                            TextSpan(
+                              text: '${rod.toY.toInt()} on $bucket',
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.normal, fontSize: 11),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
                   titlesData: FlTitlesData(
                     show: true,
                     leftTitles: const AxisTitles(
