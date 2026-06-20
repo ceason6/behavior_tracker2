@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v34';
+const String kBuildTag = 'v35';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -1507,12 +1507,12 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(14.0),
+        padding: const EdgeInsets.all(10.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Strategies used by frequency', style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w700)),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 2.0),
               child: Row(
@@ -1530,7 +1530,7 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
               final rowLabel = isTop ? labelStyle?.copyWith(color: Colors.red, fontWeight: FontWeight.w700) : labelStyle;
               final rowNum = isTop ? subtitleStyle?.copyWith(color: Colors.red, fontWeight: FontWeight.w700) : subtitleStyle;
               return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 2.0),
+                padding: const EdgeInsets.symmetric(vertical: 1.0),
                 child: Row(
                   children: [
                     Expanded(child: Text(entry.key, style: rowLabel)),
@@ -2154,6 +2154,70 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
     final subtitleStyle = theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600);
     final frequencyLabelStyle = theme.textTheme.bodyMedium?.copyWith(color: Colors.grey[700]);
 
+    // Headline stats for this student (mirrors the school dashboard tiles).
+    String maxKey(Map<String, int> m) => m.isEmpty
+        ? '-'
+        : (m.entries.toList()..sort((a, b) => b.value.compareTo(a.value))).first.key;
+    final topBehavior = maxKey(overallFrequency);
+    final peakPeriod = maxKey(_buildFrequencyByPeriod());
+    const wdNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    final wdCounts = <String, int>{};
+    for (final log in studentLogs) {
+      final k = wdNames[_logTimestamp(log).toLocal().weekday - 1];
+      wdCounts[k] = (wdCounts[k] ?? 0) + 1;
+    }
+    final highestDay = maxKey(wdCounts);
+    Widget statTile(String value, String label) => Card(
+          child: Container(
+            width: 158,
+            padding: const EdgeInsets.all(12.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 2),
+                Text(label, style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[700])),
+              ],
+            ),
+          ),
+        );
+
+    // Daily count table (reused; shown right after the stat tiles).
+    final dailyWidgets = <Widget>[
+      Text('Daily Behavior Frequency',
+          style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+      const SizedBox(height: 12),
+      ...dates.map((date) {
+        final dateFrequency = frequency[date]!;
+        return Card(
+          child: Padding(
+            padding: const EdgeInsets.all(10.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(date, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 6),
+                ...dateFrequency.entries.map((entry) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 1.0),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(child: Text(entry.key, style: frequencyLabelStyle)),
+                          const SizedBox(width: 16),
+                          Text(entry.value.toString(), style: subtitleStyle),
+                        ],
+                      ),
+                    )),
+              ],
+            ),
+          ),
+        );
+      }),
+    ];
+
     return Scaffold(
       appBar: AppBar(
         title: Text('Past Logs - $student'),
@@ -2183,11 +2247,24 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
           : ListView(
               padding: const EdgeInsets.all(16.0),
               children: [
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    statTile('${studentLogs.length}', 'Total events'),
+                    statTile(topBehavior, 'Top behavior'),
+                    statTile(peakPeriod, 'Peak Escalation Period'),
+                    statTile(highestDay, 'Highest Incident Day'),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                ...dailyWidgets,
+                const SizedBox(height: 24),
                 Text('Overall Behavior Summary', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 12),
                 Card(
                   child: Padding(
-                    padding: const EdgeInsets.all(14.0),
+                    padding: const EdgeInsets.all(10.0),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -2223,7 +2300,7 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
                                         ? subtitleStyle?.copyWith(color: Colors.red, fontWeight: FontWeight.w700)
                                         : subtitleStyle;
                                     return Padding(
-                                      padding: const EdgeInsets.symmetric(vertical: 2.0),
+                                      padding: const EdgeInsets.symmetric(vertical: 1.0),
                                       child: Row(
                                         children: [
                                           Expanded(child: Text(entry.key, style: labelStyle)),
@@ -2258,37 +2335,6 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
                 _buildAggregateFrequencyChart(context),
                 const SizedBox(height: 24),
                 _buildAggregateTrendChart(context),
-                const SizedBox(height: 24),
-                Text('Daily Behavior Frequency', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 12),
-                ...dates.map((date) {
-                  final dateFrequency = frequency[date]!;
-                  return Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(14.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(date, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
-                          const SizedBox(height: 8),
-                          ...dateFrequency.entries.map((entry) {
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 2.0),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Expanded(child: Text(entry.key, style: frequencyLabelStyle)),
-                                  const SizedBox(width: 16),
-                                  Text(entry.value.toString(), style: subtitleStyle),
-                                ],
-                              ),
-                            );
-                          }),
-                        ],
-                      ),
-                    ),
-                  );
-                }),
                 const SizedBox(height: 24),
                 Text('Detailed Logs', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 12),
@@ -3105,7 +3151,8 @@ Be concise and base every statement on the provided data. If the data are insuff
                           for (var i = 0; i < keys.length; i++)
                             FlSpot(i.toDouble(), (byStudent[s]![keys[i]] ?? 0).toDouble()),
                         ],
-                        isCurved: false,
+                        isCurved: true,
+                        curveSmoothness: 0.35,
                         color: studentColor[s],
                         barWidth: 2,
                         // Dots on so single-day ranges (Today/Yesterday) still
@@ -3144,6 +3191,7 @@ Be concise and base every statement on the provided data. If the data are insuff
     required List<String> cols,
     required int Function(String row, String col) valueAt,
     Map<String, String>? rowSymbols,
+    bool verticalColHeaders = false,
   }) {
     final theme = Theme.of(context);
     if (rows.isEmpty || cols.isEmpty) {
@@ -3187,18 +3235,30 @@ Be concise and base every statement on the provided data. If the data are insuff
       return HSVColor.fromAHSV(1.0, hue, sat, 0.96).toColor();
     }
 
-    const cellW = 48.0, cellH = 34.0, rowLabelW = 140.0, totalW = 52.0;
+    const cellH = 34.0, rowLabelW = 140.0, totalW = 52.0;
     const totalBg = Color(0xFFE0E0E0);
+    // Narrower columns + a taller header band when the column labels are
+    // rotated vertical (used for the long date labels).
+    final cellW = verticalColHeaders ? 30.0 : 48.0;
+    final headerH = verticalColHeaders ? 78.0 : cellH;
 
-    Widget headerCell(String s, double w) => SizedBox(
+    Widget headerCell(String s, double w, {bool vertical = false}) => SizedBox(
           width: w,
-          height: cellH,
+          height: headerH,
           child: Center(
-            child: Text(s,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700)),
+            child: vertical
+                ? RotatedBox(
+                    quarterTurns: 3,
+                    child: Text(s,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700)),
+                  )
+                : Text(s,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700)),
           ),
         );
     Widget dataCell(int v) {
@@ -3247,8 +3307,8 @@ Be concise and base every statement on the provided data. If the data are insuff
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(children: [
-                    const SizedBox(width: rowLabelW),
-                    ...cols.map((c) => headerCell(c, cellW)),
+                    SizedBox(width: rowLabelW, height: headerH),
+                    ...cols.map((c) => headerCell(c, cellW, vertical: verticalColHeaders)),
                     headerCell('Total', totalW),
                   ]),
                   ...rows.map((r) => Row(children: [
@@ -3475,7 +3535,8 @@ Be concise and base every statement on the provided data. If the data are insuff
                           rows: behaviorRows,
                           cols: dateCols,
                           valueAt: (r, c) => dateMap[r]?[c] ?? 0,
-                          rowSymbols: symbols),
+                          rowSymbols: symbols,
+                          verticalColHeaders: true),
                     ],
                   ),
                 ],
