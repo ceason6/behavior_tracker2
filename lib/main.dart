@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v39';
+const String kBuildTag = 'v40';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -135,8 +135,8 @@ const bool kAiFeaturesEnabled = false;
 /// Canonical school-period order (single source of truth for the dropdown and
 /// for ordering period charts/tables chronologically through the day).
 const List<String> kPeriodOrder = [
-  'Bus a.m.', 'Advisory', 'First', 'Second', 'Third', 'Fourth', 'Lunch',
-  'Fifth', 'Sixth', 'Seventh', 'Bus p.m.',
+  'Bus AM', 'Advisory', 'First', 'Second', 'Third', 'Fourth', 'Lunch',
+  'Fifth', 'Sixth', 'Seventh', 'Bus PM',
 ];
 
 String _anthropicEndpoint() {
