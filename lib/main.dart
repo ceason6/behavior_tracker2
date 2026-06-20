@@ -124,13 +124,20 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v36';
+const String kBuildTag = 'v37';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
 /// to Anthropic until the FERPA data agreements are in place. Flip to true to
 /// re-enable everywhere.
 const bool kAiFeaturesEnabled = false;
+
+/// Canonical school-period order (single source of truth for the dropdown and
+/// for ordering period charts/tables chronologically through the day).
+const List<String> kPeriodOrder = [
+  'Bus a.m.', 'Advisory', 'First', 'Second', 'Third', 'Fourth', 'Lunch',
+  'Fifth', 'Sixth', 'Seventh', 'Bus p.m.',
+];
 
 String _anthropicEndpoint() {
   const override = String.fromEnvironment('ANTHROPIC_PROXY');
@@ -396,7 +403,7 @@ class _ABCLoggingScreenState extends State<ABCLoggingScreen> {
   final bool _adminMode = Uri.base.queryParameters['admin'] == '1';
 
   final List<String> students = ["CH", "EG", "IS", "LTG", "NR"];
-  final List<String> periods = ["Bus a.m.", "Advisory", "First", "Second", "Third", "Fourth", "Lunch", "Fifth", "Sixth", "Seventh", "Bus p.m."];
+  final List<String> periods = kPeriodOrder;
   final List<String> antecedents = ["Given demand", "Told to wait", "Given corrective feedback", "Activity transition", "Unexpected change", "Divided attention", "Presence of a specific person", "Left alone", "Activity denied", "Activity interrupted", "Redirection"];
   final List<String> behaviors = ["Verbal aggression", "Threat", "Physical aggression", "Not in designated area", "Leaving building/campus", "Property destruction", "Property misuse", "Stealing", "Sleeping"];
   final List<String> consequences = ["Verbal redirection", "Behavior ignored", "Removed from activity", "Removed item", "Reprimand", "Left alone", "Blocked", "Sent to take a break", "Given another activity", "Given preferred item", "Peer remarks", "Being followed by staff"];
@@ -1847,8 +1854,14 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
       return const SizedBox.shrink();
     }
 
-    final periods = frequencyByPeriod.keys.toList();
-    final counts = frequencyByPeriod.values.toList();
+    // Order periods by the school schedule (kPeriodOrder); unknown periods last.
+    final periods = frequencyByPeriod.keys.toList()
+      ..sort((a, b) {
+        final ia = kPeriodOrder.indexOf(a);
+        final ib = kPeriodOrder.indexOf(b);
+        return (ia == -1 ? 999 : ia).compareTo(ib == -1 ? 999 : ib);
+      });
+    final counts = periods.map((p) => frequencyByPeriod[p]!).toList();
     final maxCount = counts.isNotEmpty ? counts.reduce((a, b) => a > b ? a : b) : 0;
     final theme = Theme.of(context);
 
