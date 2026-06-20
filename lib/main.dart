@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v35';
+const String kBuildTag = 'v36';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -1869,7 +1869,26 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
                 BarChartData(
                   alignment: BarChartAlignment.spaceAround,
                   maxY: (maxCount.toDouble() + 2).ceilToDouble(),
-                  barTouchData: BarTouchData(enabled: true),
+                  barTouchData: BarTouchData(
+                    enabled: true,
+                    touchTooltipData: BarTouchTooltipData(
+                      getTooltipColor: (group) => Colors.blueGrey.shade900,
+                      getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                        final period =
+                            (group.x >= 0 && group.x < periods.length) ? periods[group.x] : '';
+                        return BarTooltipItem(
+                          '$period\n',
+                          const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                          children: [
+                            TextSpan(
+                              text: '${rod.toY.toInt()}',
+                              style: const TextStyle(color: Colors.white, fontSize: 12),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
                   titlesData: FlTitlesData(
                     show: true,
                     leftTitles: const AxisTitles(
@@ -2004,7 +2023,26 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
                 BarChartData(
                   alignment: BarChartAlignment.spaceAround,
                   maxY: (maxCount.toDouble() + 2).ceilToDouble(),
-                  barTouchData: BarTouchData(enabled: true),
+                  barTouchData: BarTouchData(
+                    enabled: true,
+                    touchTooltipData: BarTouchTooltipData(
+                      getTooltipColor: (group) => Colors.blueGrey.shade900,
+                      getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                        final label =
+                            (group.x >= 0 && group.x < keys.length) ? _bucketLabel(keys[group.x], _granularity) : '';
+                        return BarTooltipItem(
+                          '$label\n',
+                          const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                          children: [
+                            TextSpan(
+                              text: '${rod.toY.toInt()}',
+                              style: const TextStyle(color: Colors.white, fontSize: 12),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
                   titlesData: FlTitlesData(
                     show: true,
                     leftTitles: const AxisTitles(
