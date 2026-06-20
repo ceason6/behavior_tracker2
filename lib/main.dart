@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v33';
+const String kBuildTag = 'v34';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -3170,6 +3170,8 @@ Be concise and base every statement on the provided data. If the data are insuff
       rowTotals[r] = rt;
       grand += rt;
     }
+    final maxRowTotal = rowTotals.values.fold<int>(0, (m, v) => v > m ? v : m);
+    final maxColTotal = colTotals.values.fold<int>(0, (m, v) => v > m ? v : m);
     // Grayscale ramp: empty = white, low = light gray, high = near-black.
     // Color gradient matching the Overview: high = red, low = blue (empty =
     // white). In B&W mode, a grayscale ramp instead (copier-friendly).
@@ -3212,13 +3214,20 @@ Be concise and base every statement on the provided data. If the data are insuff
             style: TextStyle(fontSize: 11, color: fg, fontWeight: FontWeight.w600)),
       );
     }
-    Widget totalCell(int v, double w) => Container(
+    Widget totalCell(int v, double w, {bool highlight = false}) => Container(
           width: w - 2,
           height: cellH - 2,
           margin: const EdgeInsets.all(1),
           alignment: Alignment.center,
-          decoration: BoxDecoration(color: totalBg, border: Border.all(color: Colors.black26, width: 0.5)),
-          child: Text('$v', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800)),
+          decoration: BoxDecoration(
+            color: highlight ? const Color(0xFFFFEBEE) : totalBg,
+            border: Border.all(color: Colors.black26, width: 0.5),
+          ),
+          child: Text('$v',
+              style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: highlight ? Colors.red : Colors.black87)),
         );
 
     return Card(
@@ -3255,7 +3264,8 @@ Be concise and base every statement on the provided data. If the data are insuff
                           ),
                         ),
                         ...cols.map((c) => dataCell(valueAt(r, c))),
-                        totalCell(rowTotals[r] ?? 0, totalW),
+                        totalCell(rowTotals[r] ?? 0, totalW,
+                            highlight: (rowTotals[r] ?? 0) == maxRowTotal && maxRowTotal > 0),
                       ])),
                   Row(children: [
                     const SizedBox(
@@ -3266,7 +3276,8 @@ Be concise and base every statement on the provided data. If the data are insuff
                             style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800)),
                       ),
                     ),
-                    ...cols.map((c) => totalCell(colTotals[c] ?? 0, cellW)),
+                    ...cols.map((c) => totalCell(colTotals[c] ?? 0, cellW,
+                        highlight: (colTotals[c] ?? 0) == maxColTotal && maxColTotal > 0)),
                     totalCell(grand, totalW),
                   ]),
                 ],
