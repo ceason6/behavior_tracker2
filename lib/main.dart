@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v40';
+const String kBuildTag = 'v41';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -1962,10 +1962,10 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
               return Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4.0),
                 child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Expanded(child: Text(e.value, style: theme.textTheme.bodySmall)),
-                    Text(counts[e.key].toString(), style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
+                    SizedBox(width: 130, child: Text(e.value, style: theme.textTheme.bodySmall)),
+                    SizedBox(width: 44, child: Text(counts[e.key].toString(), textAlign: TextAlign.right, style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600))),
                   ],
                 ),
               );
@@ -2289,11 +2289,10 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
                   .map((entry) => Padding(
                     padding: const EdgeInsets.symmetric(vertical: 1.0),
                     child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Expanded(child: Text(entry.key, style: frequencyLabelStyle)),
-                        const SizedBox(width: 16),
-                        Text(entry.value.toString(), style: subtitleStyle),
+                        SizedBox(width: 190, child: Text(entry.key, maxLines: 2, overflow: TextOverflow.ellipsis, style: frequencyLabelStyle)),
+                        SizedBox(width: 44, child: Text(entry.value.toString(), textAlign: TextAlign.right, style: subtitleStyle)),
                       ],
                     ),
                   )),
@@ -2971,7 +2970,10 @@ Be concise and base every statement on the provided data. If the data are insuff
       child: SegmentedButton<TimeGranularity>(
         showSelectedIcon: false,
         segments: TimeGranularity.values
-            .map((g) => ButtonSegment<TimeGranularity>(value: g, label: Text(g.label)))
+            .map((g) => ButtonSegment<TimeGranularity>(
+                value: g,
+                label: Text(g.label,
+                    style: const TextStyle(fontWeight: FontWeight.bold))))
             .toList(),
         selected: {_granularity},
         onSelectionChanged: (selection) => setState(() => _granularity = selection.first),
