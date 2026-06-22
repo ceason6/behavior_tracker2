@@ -1,19 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 220" width="220" height="220">
   <defs>
     <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#3949AB"/>
-      <stop offset="1" stop-color="#00897B"/>
+      <stop offset="0" stop-color="#0B3866"/>
+      <stop offset="1" stop-color="#0E9488"/>
     </linearGradient>
   </defs>
   <rect width="220" height="220" rx="48" fill="url(#g)"/>
-  <polyline points="56,158 110,116 164,74" fill="none" stroke="#fff" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>
-  <polyline points="150,70 168,70 168,88" fill="none" stroke="#fff" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="56" cy="158" r="22" fill="#fff"/>
-  <circle cx="110" cy="116" r="22" fill="#fff"/>
-  <circle cx="164" cy="74" r="22" fill="#fff"/>
-  <g font-family="Arial,Helvetica,sans-serif" font-weight="700" font-size="26" fill="#283593" text-anchor="middle">
-    <text x="56" y="167">A</text>
-    <text x="110" y="125">B</text>
-    <text x="164" y="83">C</text>
-  </g>
+  <path d="M48,158 Q98,150 148,127" fill="none" stroke="#FACC15" stroke-width="8" stroke-linecap="round"/>
+  <path d="M148,127 L132,127 M148,127 L139,140" fill="none" stroke="#FACC15" stroke-width="8" stroke-linecap="round"/>
+  <text x="104" y="126" font-family="Arial,Helvetica,sans-serif" font-weight="800" font-size="68" fill="#fff" text-anchor="middle">abc</text>
 </svg>

@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v43';
+const String kBuildTag = 'v44';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -197,8 +197,8 @@ Future<void> main() async {
   runApp(const MyApp());
 }
 
-/// The app logo — the "A -> B -> C path" mark (the method climbing upward):
-/// a rounded indigo->teal tile with a rising white line through three dots.
+/// The app logo — the lowercase "abc" wordmark with a rising arrow whose tip
+/// lifts up to the "c" (growth / improvement over time), on a navy->teal tile.
 /// Drawn directly so it needs no SVG package; mirrors web/favicon.svg.
 class AbcPathLogo extends StatelessWidget {
   final double size;
@@ -224,26 +224,43 @@ class _AbcPathLogoPainter extends CustomPainter {
       ..shader = const LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
-        colors: [Color(0xFF3949AB), Color(0xFF00897B)],
+        colors: [Color(0xFF0B3866), Color(0xFF0E9488)],
       ).createShader(rect);
     canvas.drawRRect(tile, bg);
 
-    final line = Paint()
-      ..color = Colors.white
+    // Rising arrow (amber), tip almost touching the "c".
+    final arrow = Paint()
+      ..color = const Color(0xFFFACC15)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 12 * s
+      ..strokeWidth = 8 * s
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round;
-    final path = Path()
-      ..moveTo(56 * s, 158 * s)
-      ..lineTo(110 * s, 116 * s)
-      ..lineTo(164 * s, 74 * s);
-    canvas.drawPath(path, line);
+    final curve = Path()
+      ..moveTo(48 * s, 158 * s)
+      ..quadraticBezierTo(98 * s, 150 * s, 148 * s, 127 * s);
+    canvas.drawPath(curve, arrow);
+    final head = Path()
+      ..moveTo(148 * s, 127 * s)
+      ..lineTo(132 * s, 127 * s)
+      ..moveTo(148 * s, 127 * s)
+      ..lineTo(139 * s, 140 * s);
+    canvas.drawPath(head, arrow);
 
-    final dot = Paint()..color = Colors.white;
-    canvas.drawCircle(Offset(56 * s, 158 * s), 20 * s, dot);
-    canvas.drawCircle(Offset(110 * s, 116 * s), 20 * s, dot);
-    canvas.drawCircle(Offset(164 * s, 74 * s), 20 * s, dot);
+    // "abc" wordmark, centered with baseline at y=126 (matches the SVG).
+    final tp = TextPainter(
+      text: TextSpan(
+        text: 'abc',
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: 68 * s,
+          fontWeight: FontWeight.w800,
+          height: 1.0,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    final baseline = tp.computeDistanceToActualBaseline(TextBaseline.alphabetic);
+    tp.paint(canvas, Offset(104 * s - tp.width / 2, 126 * s - baseline));
   }
 
   @override
