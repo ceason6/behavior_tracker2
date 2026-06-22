@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v41';
+const String kBuildTag = 'v42';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -195,6 +195,59 @@ Future<pw.ThemeData> _pdfUnicodeTheme() {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const MyApp());
+}
+
+/// The app logo — the "A -> B -> C path" mark (the method climbing upward):
+/// a rounded indigo->teal tile with a rising white line through three dots.
+/// Drawn directly so it needs no SVG package; mirrors web/favicon.svg.
+class AbcPathLogo extends StatelessWidget {
+  final double size;
+  const AbcPathLogo({super.key, this.size = 32});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: size,
+      height: size,
+      child: CustomPaint(painter: _AbcPathLogoPainter()),
+    );
+  }
+}
+
+class _AbcPathLogoPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final s = size.width / 220.0; // SVG viewBox is 0..220
+    final rect = Offset.zero & size;
+    final tile = RRect.fromRectAndRadius(rect, Radius.circular(48 * s));
+    final bg = Paint()
+      ..shader = const LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [Color(0xFF3949AB), Color(0xFF00897B)],
+      ).createShader(rect);
+    canvas.drawRRect(tile, bg);
+
+    final line = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 12 * s
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    final path = Path()
+      ..moveTo(56 * s, 158 * s)
+      ..lineTo(110 * s, 116 * s)
+      ..lineTo(164 * s, 74 * s);
+    canvas.drawPath(path, line);
+
+    final dot = Paint()..color = Colors.white;
+    canvas.drawCircle(Offset(56 * s, 158 * s), 20 * s, dot);
+    canvas.drawCircle(Offset(110 * s, 116 * s), 20 * s, dot);
+    canvas.drawCircle(Offset(164 * s, 74 * s), 20 * s, dot);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class MyApp extends StatelessWidget {
@@ -1043,6 +1096,10 @@ ${buffer.toString()}''';
 
     return Scaffold(
       appBar: AppBar(
+        leading: const Padding(
+          padding: EdgeInsets.all(8.0),
+          child: AbcPathLogo(size: 32),
+        ),
         title: Text('New ABC Behavior Log  ($kBuildTag)'),
         actions: [
           IconButton(
