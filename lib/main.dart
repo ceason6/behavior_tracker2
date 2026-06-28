@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v46';
+const String kBuildTag = 'v47';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -1735,7 +1735,7 @@ ${buffer.toString()}''';
                   style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700, color: Colors.grey[200]),
                 ),
                 const SizedBox(height: 12),
-                ..._savedLogs.map((log) {
+                ..._sortedLogs().map((log) {
                   return Card(
                     margin: const EdgeInsets.symmetric(vertical: 6),
                     child: Padding(
