@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v45';
+const String kBuildTag = 'v46';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -257,7 +257,27 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'ABC Behavior Tracker',
-      theme: ThemeData(primarySwatch: Colors.blue),
+      theme: ThemeData(
+        useMaterial3: true,
+        brightness: Brightness.dark,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF00897B), // teal brand accent
+          brightness: Brightness.dark,
+        ),
+        scaffoldBackgroundColor: const Color(0xFF0C1411), // dark green-black (Oura)
+        cardColor: const Color(0xFF16201B), // green-tinted dark card
+        cardTheme: CardThemeData(
+          color: const Color(0xFF16201B),
+          elevation: 4,
+          shadowColor: Colors.black,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+            side: BorderSide(
+                color: const Color(0xFF2DD4BF).withValues(alpha: 0.55),
+                width: 1.4),
+          ),
+        ),
+      ),
       home: const ABCLoggingScreen(),
       debugShowCheckedModeBanner: false,
     );
@@ -431,10 +451,38 @@ class _ABCLoggingScreenState extends State<ABCLoggingScreen> {
   String? selectedConsequence;
   String? selectedProactiveStrategy;
   String? selectedStaff;
+  String? selectedIntensity; // Low / Medium / High (FBA-style severity)
+
+  // One-tap "common incident" presets that prefill the A·B·C·Strategy cards.
+  // Values reference the school's configured option lists above.
+  final List<Map<String, String>> _quickTemplates = const [
+    {
+      'label': 'Demand → Aggression',
+      'antecedent': 'Given demand',
+      'behavior': 'Physical aggression',
+      'consequence': 'Verbal redirection',
+      'proactiveStrategy': 'Offer Choices',
+    },
+    {
+      'label': 'Transition → Elopement',
+      'antecedent': 'Activity transition',
+      'behavior': 'Leaving building/campus',
+      'consequence': 'Being followed by staff',
+      'proactiveStrategy': 'Countdown Before Transitions',
+    },
+    {
+      'label': 'Denied → Verbal',
+      'antecedent': 'Activity denied',
+      'behavior': 'Verbal aggression',
+      'consequence': 'Verbal redirection',
+      'proactiveStrategy': 'Positive Interaction',
+    },
+  ];
 
   final antecedentDescController = TextEditingController();
   final behaviorDescController = TextEditingController();
   final consequenceDescController = TextEditingController();
+  final proactiveStrategyDescController = TextEditingController();
 
   final antecedentFocusNode = FocusNode();
   final behaviorFocusNode = FocusNode();
@@ -875,7 +923,8 @@ ${buffer.toString()}''';
     'antecedent', 'antecedentDescription',
     'behavior', 'behaviorDescription',
     'consequence', 'consequenceDescription',
-    'proactiveStrategy', 'staff', 'id',
+    'proactiveStrategy', 'proactiveStrategyDescription',
+    'intensity', 'staff', 'id',
   ];
 
   String _logsToCsv(List<Map<String, dynamic>> logs) {
@@ -904,6 +953,8 @@ ${buffer.toString()}''';
       'consequence': selectedConsequence ?? '',
       'consequenceDescription': consequenceDescController.text,
       'proactiveStrategy': selectedProactiveStrategy ?? '',
+      'proactiveStrategyDescription': proactiveStrategyDescController.text,
+      'intensity': selectedIntensity ?? '',
       'staff': selectedStaff ?? '',
       'timestamp': selectedDateTime.toIso8601String(),
       'ai': _lastAiMeta ?? {},
@@ -1039,17 +1090,65 @@ ${buffer.toString()}''';
       selectedBehavior = null;
       selectedConsequence = null;
       selectedProactiveStrategy = null;
+      selectedIntensity = null;
       selectedStaff = null;
       antecedentDescController.clear();
       behaviorDescController.clear();
       consequenceDescController.clear();
+      proactiveStrategyDescController.clear();
       selectedDateTime = DateTime.now();
       _lastAiMeta = null;
     });
   }
 
+  /// Clears only the incident details (A·B·C·Strategy·intensity) but keeps the
+  /// student, period and staff, so logging another event for the same student
+  /// is one tap away. Time resets to "now".
+  void _resetForIncident() {
+    setState(() {
+      _formResetKey++;
+      selectedAntecedent = null;
+      selectedBehavior = null;
+      selectedConsequence = null;
+      selectedProactiveStrategy = null;
+      selectedIntensity = null;
+      antecedentDescController.clear();
+      behaviorDescController.clear();
+      consequenceDescController.clear();
+      proactiveStrategyDescController.clear();
+      selectedDateTime = DateTime.now();
+      _lastAiMeta = null;
+    });
+  }
+
+  /// Small chip used by the "Quick set" time row.
+  Widget _timeQuickChip(String label, VoidCallback apply) {
+    return ActionChip(
+      label: Text(label, style: const TextStyle(fontSize: 12)),
+      onPressed: () => setState(apply),
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    );
+  }
+
+  /// Applies a "common incident" preset to the cards.
+  void _applyTemplate(Map<String, String> t) {
+    setState(() {
+      selectedAntecedent = t['antecedent'];
+      selectedBehavior = t['behavior'];
+      selectedConsequence = t['consequence'];
+      selectedProactiveStrategy = t['proactiveStrategy'];
+    });
+  }
+
   Future<void> _saveLog() async {
     if (!_formKey.currentState!.validate()) return;
+    if (selectedBehavior == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please choose a Behavior under Incident Metrics.')),
+      );
+      return;
+    }
     try {
       final logEntry = _buildLogEntry();
       setState(() {
@@ -1060,11 +1159,24 @@ ${buffer.toString()}''';
       _pushEntry(logEntry);
       if (!mounted) return;
 
-      // Clear the form automatically so it's ready for the next entry.
-      _resetForm();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('✅ ABC Event Saved!')),
-      );
+      // Keep the student/period/staff so logging another event for the same
+      // student is immediate; clear only the incident details.
+      final savedStudent = selectedStudent;
+      _resetForIncident();
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(savedStudent == null || savedStudent.isEmpty
+                ? '✅ Event saved — ready for the next one'
+                : '✅ Saved — ready to log another for $savedStudent'),
+            duration: const Duration(seconds: 3),
+            action: SnackBarAction(
+              label: 'New student',
+              onPressed: _resetForm,
+            ),
+          ),
+        );
     } catch (e) {
       // Never fail silently — surface the problem so it can't look like a no-op.
       if (!mounted) return;
@@ -1086,12 +1198,216 @@ ${buffer.toString()}''';
     );
   }
 
+  /// One tappable "Incident Metrics" card (Antecedent / Behavior / ...).
+  /// Compact "what you're about to log" review card shown above Save.
+  Widget _buildReviewSummary(ThemeData theme) {
+    final chosen = <List<dynamic>>[
+      ['Antecedent', selectedAntecedent, const Color(0xFFF59E0B)],
+      ['Behavior', selectedBehavior, const Color(0xFFEF4444)],
+      ['Consequence', selectedConsequence, const Color(0xFF2DD4BF)],
+      ['Strategy', selectedProactiveStrategy, const Color(0xFF22C55E)],
+      ['Intensity', selectedIntensity, const Color(0xFF94A3B8)],
+    ].where((e) => e[1] != null).toList();
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF16201B),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.fact_check_outlined, size: 16, color: Colors.grey[400]),
+              const SizedBox(width: 6),
+              Text('REVIEW',
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.6,
+                      color: Colors.grey[400])),
+              const Spacer(),
+              Text(_formatDateTime(selectedDateTime),
+                  style: TextStyle(fontSize: 12, color: Colors.grey[300])),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (chosen.isEmpty)
+            Text('Nothing selected yet — tap a card above.',
+                style: TextStyle(fontSize: 13, color: Colors.grey[500]))
+          else
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: chosen.map((e) {
+                final color = e[2] as Color;
+                return Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: color.withValues(alpha: 0.5)),
+                  ),
+                  child: Text('${e[0]}: ${e[1]}',
+                      style: const TextStyle(fontSize: 12, color: Colors.white)),
+                );
+              }).toList(),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _metricCard({
+    required int number,
+    required IconData icon,
+    required Color accent,
+    required String label,
+    required String? value,
+    required bool described,
+    bool isRequired = false,
+    required VoidCallback onTap,
+  }) {
+    final done = value != null;
+    final borderAlpha = done ? 0.9 : (isRequired ? 0.7 : 0.4);
+    final glowAlpha = done ? 0.35 : (isRequired ? 0.28 : 0.15);
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF16201B),
+        borderRadius: BorderRadius.circular(14),
+        border:
+            Border.all(color: accent.withValues(alpha: borderAlpha), width: 2.4),
+        boxShadow: [
+          BoxShadow(
+            color: accent.withValues(alpha: glowAlpha),
+            blurRadius: 14,
+            spreadRadius: -1,
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 20,
+                      height: 20,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: accent.withValues(alpha: done ? 1 : 0.18),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                            color: accent.withValues(alpha: 0.8), width: 1),
+                      ),
+                      child: Text(
+                        '$number',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w800,
+                          color: done ? const Color(0xFF0C1411) : accent,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Icon(icon, size: 16, color: accent),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: Text(
+                        label.toUpperCase(),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12,
+                          letterSpacing: 0.3,
+                          color: Colors.grey[200],
+                        ),
+                      ),
+                    ),
+                    if (done)
+                      Icon(Icons.check_circle, size: 15, color: accent)
+                    else if (described)
+                      Icon(Icons.notes, size: 13, color: accent),
+                    Icon(Icons.chevron_right, size: 16, color: Colors.grey[500]),
+                  ],
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  value ??
+                      (isRequired ? "Required — tap to choose" : "Tap to choose"),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 14.5,
+                    fontWeight: done ? FontWeight.w600 : FontWeight.w400,
+                    color: done
+                        ? Colors.white
+                        : (isRequired ? accent : Colors.grey[500]),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// In-session "recently used" choices per metric (most-recent first).
+  final Map<String, List<String>> _recentChoices = {};
+
+  /// Opens the option-picker sub-screen for one metric and applies the result.
+  Future<void> _openIncidentPicker({
+    required String title,
+    required List<String> options,
+    required String? selected,
+    required TextEditingController descController,
+    required void Function(String?) onSelected,
+  }) async {
+    final result = await Navigator.of(context).push<Map<String, dynamic>>(
+      MaterialPageRoute(
+        builder: (_) => IncidentPickerScreen(
+          title: title,
+          options: options,
+          selected: selected,
+          description: descController.text,
+          recents: _recentChoices[title] ?? const [],
+        ),
+      ),
+    );
+    if (result == null || !mounted) return;
+    setState(() {
+      final picked = result['selected'] as String?;
+      onSelected(picked);
+      descController.text = (result['description'] as String?) ?? '';
+      if (picked != null) {
+        final list = _recentChoices.putIfAbsent(title, () => <String>[]);
+        list.remove(picked);
+        list.insert(0, picked);
+        if (list.length > 3) list.removeRange(3, list.length);
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final sectionHeadingStyle = theme.textTheme.titleMedium?.copyWith(
       fontWeight: FontWeight.w700,
-      color: Colors.grey[900],
+      color: Colors.grey[200],
     );
 
     return Scaffold(
@@ -1185,6 +1501,26 @@ ${buffer.toString()}''';
                   ),
                 ),
               ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Text('Quick set:',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[400])),
+                  const SizedBox(width: 8),
+                  _timeQuickChip('Now',
+                      () => selectedDateTime = DateTime.now()),
+                  const SizedBox(width: 6),
+                  _timeQuickChip(
+                      '−5 min',
+                      () => selectedDateTime =
+                          selectedDateTime.subtract(const Duration(minutes: 5))),
+                  const SizedBox(width: 6),
+                  _timeQuickChip(
+                      '−10 min',
+                      () => selectedDateTime = selectedDateTime
+                          .subtract(const Duration(minutes: 10))),
+                ],
+              ),
               const SizedBox(height: 16),
 
               Text("School Period", style: sectionHeadingStyle),
@@ -1198,101 +1534,164 @@ ${buffer.toString()}''';
               ),
               const SizedBox(height: 24),
 
-              Text("Antecedent", style: sectionHeadingStyle),
-              DropdownButtonFormField<String>(
-                key: ValueKey('antecedent-$_formResetKey'),
-                initialValue: selectedAntecedent,
-                hint: const Text("What happened before?"),
-                items: antecedents.map((a) => DropdownMenuItem(value: a, child: Text(a))).toList(),
-                onChanged: (v) => setState(() => selectedAntecedent = v),
-              ),
-              TextFormField(
-                controller: antecedentDescController,
-                focusNode: antecedentFocusNode,
-                decoration: InputDecoration(
-                  labelText: "Description",
-                  suffixIcon: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.keyboard_alt),
-                        onPressed: () => antecedentFocusNode.requestFocus(),
+              Text("Incident Metrics", style: sectionHeadingStyle),
+              const SizedBox(height: 4),
+              Builder(builder: (_) {
+                final filled = [
+                  selectedAntecedent,
+                  selectedBehavior,
+                  selectedConsequence,
+                  selectedProactiveStrategy,
+                ].where((e) => e != null).length;
+                return Row(
+                  children: [
+                    Text('$filled of 4 added',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                            color: Colors.grey[300],
+                            fontWeight: FontWeight.w600)),
+                    if (selectedBehavior == null) ...[
+                      Text('   ·   ',
+                          style: TextStyle(color: Colors.grey[600])),
+                      Text('Behavior required',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                              color: const Color(0xFFEF4444),
+                              fontWeight: FontWeight.w600)),
+                    ] else
+                      const Padding(
+                        padding: EdgeInsets.only(left: 6),
+                        child: Icon(Icons.check_circle,
+                            size: 14, color: Color(0xFF22C55E)),
                       ),
-                      _micButton(antecedentDescController),
-                    ],
-                  ),
+                  ],
+                );
+              }),
+              const SizedBox(height: 10),
+              // Quick-fill presets for common incidents.
+              SizedBox(
+                height: 36,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8, top: 6),
+                      child: Text('Quick fill:',
+                          style:
+                              TextStyle(fontSize: 12, color: Colors.grey[400])),
+                    ),
+                    ..._quickTemplates.map((t) => Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: ActionChip(
+                            avatar: const Icon(Icons.flash_on, size: 14),
+                            label: Text(t['label']!,
+                                style: const TextStyle(fontSize: 12)),
+                            onPressed: () => _applyTemplate(t),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                        )),
+                  ],
                 ),
-                maxLines: 2,
               ),
-              const SizedBox(height: 24),
-
-              Text("Behavior", style: sectionHeadingStyle),
-              DropdownButtonFormField<String>(
-                key: ValueKey('behavior-$_formResetKey'),
-                initialValue: selectedBehavior,
-                hint: const Text("What did the student do?"),
-                items: behaviors.map((b) => DropdownMenuItem(value: b, child: Text(b))).toList(),
-                onChanged: (v) => setState(() => selectedBehavior = v),
-                validator: (v) => v == null ? "Required" : null,
+              const SizedBox(height: 12),
+              GridView.count(
+                crossAxisCount: 2,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                mainAxisSpacing: 10,
+                crossAxisSpacing: 10,
+                childAspectRatio: 2.4,
+                children: [
+                  _metricCard(
+                    number: 1,
+                    icon: Icons.bolt,
+                    accent: const Color(0xFFF59E0B), // amber
+                    label: "Antecedent",
+                    value: selectedAntecedent,
+                    described: antecedentDescController.text.trim().isNotEmpty,
+                    onTap: () => _openIncidentPicker(
+                      title: "Antecedent",
+                      options: antecedents,
+                      selected: selectedAntecedent,
+                      descController: antecedentDescController,
+                      onSelected: (v) => selectedAntecedent = v,
+                    ),
+                  ),
+                  _metricCard(
+                    number: 2,
+                    icon: Icons.directions_run,
+                    accent: const Color(0xFFEF4444), // red
+                    label: "Behavior",
+                    value: selectedBehavior,
+                    described: behaviorDescController.text.trim().isNotEmpty,
+                    isRequired: true,
+                    onTap: () => _openIncidentPicker(
+                      title: "Behavior",
+                      options: behaviors,
+                      selected: selectedBehavior,
+                      descController: behaviorDescController,
+                      onSelected: (v) => selectedBehavior = v,
+                    ),
+                  ),
+                  _metricCard(
+                    number: 3,
+                    icon: Icons.east,
+                    accent: const Color(0xFF2DD4BF), // teal
+                    label: "Consequence",
+                    value: selectedConsequence,
+                    described: consequenceDescController.text.trim().isNotEmpty,
+                    onTap: () => _openIncidentPicker(
+                      title: "Consequence",
+                      options: consequences,
+                      selected: selectedConsequence,
+                      descController: consequenceDescController,
+                      onSelected: (v) => selectedConsequence = v,
+                    ),
+                  ),
+                  _metricCard(
+                    number: 4,
+                    icon: Icons.lightbulb_outline,
+                    accent: const Color(0xFF22C55E), // green
+                    label: "Proactive Strategy",
+                    value: selectedProactiveStrategy,
+                    described:
+                        proactiveStrategyDescController.text.trim().isNotEmpty,
+                    onTap: () => _openIncidentPicker(
+                      title: "Proactive Strategy",
+                      options: proactiveStrategies,
+                      selected: selectedProactiveStrategy,
+                      descController: proactiveStrategyDescController,
+                      onSelected: (v) => selectedProactiveStrategy = v,
+                    ),
+                  ),
+                ],
               ),
-              TextFormField(
-                controller: behaviorDescController,
-                focusNode: behaviorFocusNode,
-                decoration: InputDecoration(
-                  labelText: "Description",
-                  suffixIcon: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.keyboard_alt),
-                        onPressed: () => behaviorFocusNode.requestFocus(),
+              const SizedBox(height: 18),
+              Text("Behavior intensity", style: sectionHeadingStyle),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  for (final level in const [
+                    ['Low', Color(0xFF22C55E)],
+                    ['Medium', Color(0xFFF59E0B)],
+                    ['High', Color(0xFFEF4444)],
+                  ])
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: ChoiceChip(
+                        label: Text(level[0] as String),
+                        selected: selectedIntensity == level[0],
+                        showCheckmark: false,
+                        selectedColor:
+                            (level[1] as Color).withValues(alpha: 0.30),
+                        side: BorderSide(
+                            color: selectedIntensity == level[0]
+                                ? level[1] as Color
+                                : Colors.white24,
+                            width: selectedIntensity == level[0] ? 1.8 : 1),
+                        onSelected: (sel) => setState(() =>
+                            selectedIntensity = sel ? level[0] as String : null),
                       ),
-                      _micButton(behaviorDescController),
-                    ],
-                  ),
-                ),
-                maxLines: 2,
-              ),
-              const SizedBox(height: 24),
-
-              Text("Consequence", style: sectionHeadingStyle),
-              DropdownButtonFormField<String>(
-                key: ValueKey('consequence-$_formResetKey'),
-                initialValue: selectedConsequence,
-                hint: const Text("What happened after?"),
-                items: consequences.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
-                onChanged: (v) => setState(() => selectedConsequence = v),
-              ),
-              TextFormField(
-                controller: consequenceDescController,
-                focusNode: consequenceFocusNode,
-                decoration: InputDecoration(
-                  labelText: "Description",
-                  suffixIcon: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.keyboard_alt),
-                        onPressed: () => consequenceFocusNode.requestFocus(),
-                      ),
-                      _micButton(consequenceDescController),
-                    ],
-                  ),
-                ),
-                maxLines: 2,
-              ),
-              const SizedBox(height: 24),
-
-              Text("Proactive Strategies", style: sectionHeadingStyle),
-              DropdownButtonFormField<String>(
-                key: ValueKey('proactive-$_formResetKey'),
-                initialValue: selectedProactiveStrategy,
-                isExpanded: true,
-                hint: const Text("Select a proactive strategy"),
-                items: proactiveStrategies
-                    .map((s) => DropdownMenuItem(value: s, child: Text(s)))
-                    .toList(),
-                onChanged: (v) => setState(() => selectedProactiveStrategy = v),
+                    ),
+                ],
               ),
               const SizedBox(height: 24),
               Text("Logged by", style: sectionHeadingStyle),
@@ -1303,7 +1702,9 @@ ${buffer.toString()}''';
                 items: staffMembers.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
                 onChanged: (v) => setState(() => selectedStaff = v),
               ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 24),
+              _buildReviewSummary(theme),
+              const SizedBox(height: 16),
 
               SizedBox(
                 width: double.infinity,
@@ -1331,7 +1732,7 @@ ${buffer.toString()}''';
                 const SizedBox(height: 16),
                 Text(
                   'Saved behavior logs',
-                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700, color: Colors.grey[900]),
+                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700, color: Colors.grey[200]),
                 ),
                 const SizedBox(height: 12),
                 ..._savedLogs.map((log) {
@@ -1364,6 +1765,10 @@ ${buffer.toString()}''';
                             const SizedBox(height: 4),
                             Text('Proactive strategy: ${_logStr(log, 'proactiveStrategy')}'),
                           ],
+                          if (_logStr(log, 'intensity').isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text('Intensity: ${_logStr(log, 'intensity')}'),
+                          ],
                           if (_logStr(log, 'staff').isNotEmpty) ...[
                             const SizedBox(height: 4),
                             Text('Logged by: ${_logStr(log, 'staff')}'),
@@ -1388,6 +1793,7 @@ ${buffer.toString()}''';
     antecedentDescController.dispose();
     behaviorDescController.dispose();
     consequenceDescController.dispose();
+    proactiveStrategyDescController.dispose();
     antecedentFocusNode.dispose();
     behaviorFocusNode.dispose();
     consequenceFocusNode.dispose();
@@ -1456,6 +1862,10 @@ class HistoryScreen extends StatelessWidget {
                             if (_logStr(log, 'proactiveStrategy').isNotEmpty) ...[
                               const SizedBox(height: 4),
                               Text('Proactive strategy: ${_logStr(log, 'proactiveStrategy')}'),
+                            ],
+                            if (_logStr(log, 'intensity').isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text('Intensity: ${_logStr(log, 'intensity')}'),
                             ],
                             if (_logStr(log, 'staff').isNotEmpty) ...[
                               const SizedBox(height: 4),
@@ -2283,7 +2693,8 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
         ? '-'
         : (m.entries.toList()..sort((a, b) => b.value.compareTo(a.value))).first.key;
     final topBehavior = maxKey(overallFrequency);
-    final peakPeriod = maxKey(_buildFrequencyByPeriod());
+    final periodFreq = _buildFrequencyByPeriod();
+    final peakPeriod = maxKey(periodFreq);
     const wdNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     final wdCounts = <String, int>{};
     for (final log in studentLogs) {
@@ -2291,9 +2702,11 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
       wdCounts[k] = (wdCounts[k] ?? 0) + 1;
     }
     final highestDay = maxKey(wdCounts);
-    Widget statTile(String value, String label, Color color) => Container(
+    Widget statTile(String value, String label, Color color, {String? sub}) =>
+        Container(
           width: 168,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+          height: 126,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topLeft,
@@ -2311,21 +2724,33 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
+              Text(label,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                      color: Colors.white.withValues(alpha: 0.95),
+                      fontWeight: FontWeight.w700,
+                      height: 1.15)),
+              const SizedBox(height: 6),
               Text(value,
                   textAlign: TextAlign.center,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.w800, color: Colors.white)),
-              const SizedBox(height: 4),
-              Text(label,
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                      color: Colors.white.withValues(alpha: 0.92),
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.2)),
+              if (sub != null) ...[
+                const SizedBox(height: 4),
+                Text(sub,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                        color: Colors.white.withValues(alpha: 0.85),
+                        fontWeight: FontWeight.w600)),
+              ],
             ],
           ),
         );
@@ -2410,9 +2835,20 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
                   runSpacing: 8,
                   children: [
                     statTile('${studentLogs.length}', 'Total Events', const Color(0xFF3949AB)),
-                    statTile(topBehavior, 'Top Behavior', const Color(0xFF00897B)),
-                    statTile(peakPeriod, 'Peak Escalation Period', const Color(0xFFE65100)),
-                    statTile(highestDay, 'Highest Incident Day', const Color(0xFF6A1B9A)),
+                    statTile(topBehavior, 'Top Behavior', const Color(0xFF00897B),
+                        sub: overallFrequency[topBehavior] != null
+                            ? '${overallFrequency[topBehavior]} incidents'
+                            : null),
+                    statTile(peakPeriod, 'Peak Escalation Period',
+                        const Color(0xFFE65100),
+                        sub: periodFreq[peakPeriod] != null
+                            ? '${periodFreq[peakPeriod]} incidents'
+                            : null),
+                    statTile(highestDay, 'Highest Incident Day',
+                        const Color(0xFF6A1B9A),
+                        sub: wdCounts[highestDay] != null
+                            ? '${wdCounts[highestDay]} incidents'
+                            : null),
                   ],
                 ),
                 const SizedBox(height: 24),
@@ -3388,7 +3824,9 @@ Be concise and base every statement on the provided data. If the data are insuff
     // Color gradient matching the Overview: high = red, low = blue (empty =
     // white). In B&W mode, a grayscale ramp instead (copier-friendly).
     Color cellColor(int v) {
-      if (v <= 0) return Colors.white;
+      // Empty cells: white for B&W/print, muted dark in the on-screen view so
+      // they blend with the dark theme and only cells with data stand out.
+      if (v <= 0) return _bw ? Colors.white : const Color(0xFF202A24);
       final t = (v / (maxV == 0 ? 1 : maxV)).clamp(0.0, 1.0);
       if (_bw) {
         return Color.lerp(const Color(0xFFEEEEEE), const Color(0xFF222222),
@@ -3399,11 +3837,11 @@ Be concise and base every statement on the provided data. If the data are insuff
       return HSVColor.fromAHSV(1.0, hue, sat, 0.96).toColor();
     }
 
-    const cellH = 34.0, rowLabelW = 140.0, totalW = 52.0;
+    const cellH = 28.0, rowLabelW = 116.0, totalW = 42.0;
     const totalBg = Color(0xFFE0E0E0);
     // Narrower columns + a taller header band when the column labels are
     // rotated vertical (used for the long date labels).
-    final cellW = verticalColHeaders ? 30.0 : 48.0;
+    final cellW = verticalColHeaders ? 24.0 : 36.0;
     final headerH = verticalColHeaders ? 78.0 : cellH;
 
     Widget headerCell(String s, double w, {bool vertical = false}) => SizedBox(
@@ -3433,7 +3871,13 @@ Be concise and base every statement on the provided data. If the data are insuff
         height: cellH - 2,
         margin: const EdgeInsets.all(1),
         alignment: Alignment.center,
-        decoration: BoxDecoration(color: bg, border: Border.all(color: Colors.black12, width: 0.5)),
+        decoration: BoxDecoration(
+            color: bg,
+            border: Border.all(
+                color: _bw
+                    ? Colors.black12
+                    : Colors.white.withValues(alpha: 0.08),
+                width: 0.5)),
         child: Text(v > 0 ? '$v' : '',
             style: TextStyle(fontSize: 11, color: fg, fontWeight: FontWeight.w600)),
       );
@@ -3602,9 +4046,11 @@ Be concise and base every statement on the provided data. If the data are insuff
     final weekdayTotals = _countsByWeekday()..sort((a, b) => b.value.compareTo(a.value));
     final busiestDay = weekdayTotals.isNotEmpty ? weekdayTotals.first.key : '-';
 
-    Widget statTile(String value, String label, Color color) => Container(
+    Widget statTile(String value, String label, Color color, {String? sub}) =>
+        Container(
           width: 168,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+          height: 126,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topLeft,
@@ -3622,21 +4068,33 @@ Be concise and base every statement on the provided data. If the data are insuff
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
+              Text(label,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                      color: Colors.white.withValues(alpha: 0.95),
+                      fontWeight: FontWeight.w700,
+                      height: 1.15)),
+              const SizedBox(height: 6),
               Text(value,
                   textAlign: TextAlign.center,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.w800, color: Colors.white)),
-              const SizedBox(height: 4),
-              Text(label,
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                      color: Colors.white.withValues(alpha: 0.92),
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.2)),
+              if (sub != null) ...[
+                const SizedBox(height: 4),
+                Text(sub,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                        color: Colors.white.withValues(alpha: 0.85),
+                        fontWeight: FontWeight.w600)),
+              ],
             ],
           ),
         );
@@ -3667,11 +4125,21 @@ Be concise and base every statement on the provided data. If the data are insuff
                 runSpacing: 8,
                 children: [
                   statTile('${logs.length}', 'Total Events', const Color(0xFF3949AB)),
-                  statTile(topBehavior != null ? '${topBehavior.value}' : '-',
-                      topBehavior != null ? 'Top: ${topBehavior.key}' : 'Top Behavior',
-                      const Color(0xFF00897B)),
-                  statTile(busiestPeriod, 'Peak Escalation Period', const Color(0xFFE65100)),
-                  statTile(busiestDay, 'Highest Incident Day', const Color(0xFF6A1B9A)),
+                  statTile(topBehavior?.key ?? '-', 'Top Behavior',
+                      const Color(0xFF00897B),
+                      sub: topBehavior != null
+                          ? '${topBehavior.value} incidents'
+                          : null),
+                  statTile(busiestPeriod, 'Peak Escalation Period',
+                      const Color(0xFFE65100),
+                      sub: periodTotals.isNotEmpty
+                          ? '${periodTotals.first.value} incidents'
+                          : null),
+                  statTile(busiestDay, 'Highest Incident Day',
+                      const Color(0xFF6A1B9A),
+                      sub: weekdayTotals.isNotEmpty
+                          ? '${weekdayTotals.first.value} incidents'
+                          : null),
                 ],
               ),
             ),
@@ -3726,6 +4194,249 @@ Be concise and base every statement on the provided data. If the data are insuff
                     ],
                   ),
                 ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Full-screen picker for one Incident Metric: choose an option from the list
+/// and (optionally) add a typed or dictated description. Returns
+/// {selected, description} when the back button or Done is used.
+class IncidentPickerScreen extends StatefulWidget {
+  const IncidentPickerScreen({
+    super.key,
+    required this.title,
+    required this.options,
+    this.selected,
+    this.description = '',
+    this.showDescription = true,
+    this.recents = const [],
+  });
+
+  final String title;
+  final List<String> options;
+  final String? selected;
+  final String description;
+  final bool showDescription;
+  final List<String> recents;
+
+  @override
+  State<IncidentPickerScreen> createState() => _IncidentPickerScreenState();
+}
+
+class _IncidentPickerScreenState extends State<IncidentPickerScreen> {
+  String? _selected;
+  String _query = '';
+  late final TextEditingController _desc;
+  final FocusNode _focus = FocusNode();
+  final SpeechToText _speech = SpeechToText();
+  bool _speechReady = false;
+  bool _listening = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _selected = widget.selected;
+    _desc = TextEditingController(text: widget.description);
+  }
+
+  @override
+  void dispose() {
+    _speech.stop();
+    _desc.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  void _done() => Navigator.of(context)
+      .pop(<String, dynamic>{'selected': _selected, 'description': _desc.text});
+
+  Future<void> _toggleMic() async {
+    if (_listening) {
+      await _speech.stop();
+      if (mounted) setState(() => _listening = false);
+      return;
+    }
+    if (!_speechReady) {
+      try {
+        _speechReady = await _speech.initialize(
+          onStatus: (s) {
+            if ((s == 'done' || s == 'notListening') && mounted) {
+              setState(() => _listening = false);
+            }
+          },
+          onError: (e) {
+            if (mounted) setState(() => _listening = false);
+          },
+        );
+      } catch (_) {
+        _speechReady = false;
+      }
+    }
+    if (!_speechReady) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Voice input unavailable')),
+        );
+      }
+      return;
+    }
+    setState(() => _listening = true);
+    _speech.listen(
+      listenOptions: SpeechListenOptions(listenFor: const Duration(seconds: 30)),
+      onResult: (SpeechRecognitionResult r) {
+        setState(() {
+          _desc.text = r.recognizedWords;
+          _desc.selection =
+              TextSelection.fromPosition(TextPosition(offset: _desc.text.length));
+          if (r.finalResult) _listening = false;
+        });
+      },
+    );
+  }
+
+  /// Builds the option rows: search results when typing, otherwise a
+  /// "Recently used" group (in-session) above the full "All options" list.
+  List<Widget> _optionTiles(ThemeData theme) {
+    final accent = theme.colorScheme.primary;
+    final q = _query.trim().toLowerCase();
+
+    Widget tile(String o) {
+      final isSel = o == _selected;
+      return ListTile(
+        dense: true,
+        title: Text(o,
+            style: TextStyle(
+                fontWeight: isSel ? FontWeight.w700 : FontWeight.w400)),
+        trailing: Icon(
+          isSel ? Icons.check_circle : Icons.circle_outlined,
+          color: isSel ? accent : Colors.grey,
+        ),
+        selected: isSel,
+        selectedTileColor: accent.withValues(alpha: 0.12),
+        onTap: () => setState(() => _selected = isSel ? null : o),
+      );
+    }
+
+    Widget header(String t) => Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+          child: Text(t,
+              style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.6,
+                  color: Colors.grey[500])),
+        );
+
+    if (q.isNotEmpty) {
+      final matches =
+          widget.options.where((o) => o.toLowerCase().contains(q)).toList();
+      if (matches.isEmpty) {
+        return [
+          Padding(
+            padding: const EdgeInsets.all(24),
+            child: Center(
+              child: Text('No matches for "$_query"',
+                  style: TextStyle(color: Colors.grey[500])),
+            ),
+          ),
+        ];
+      }
+      return matches.map(tile).toList();
+    }
+
+    final recent =
+        widget.recents.where((r) => widget.options.contains(r)).toList();
+    final rest = widget.options.where((o) => !recent.contains(o)).toList();
+    return [
+      if (recent.isNotEmpty) ...[
+        header('RECENTLY USED'),
+        ...recent.map(tile),
+        header('ALL OPTIONS'),
+      ],
+      ...rest.map(tile),
+    ];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) _done();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            tooltip: 'Back',
+            onPressed: _done,
+          ),
+          title: Text(widget.title),
+        ),
+        body: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+              child: TextField(
+                onChanged: (v) => setState(() => _query = v),
+                decoration: const InputDecoration(
+                  isDense: true,
+                  hintText: 'Search…',
+                  prefixIcon: Icon(Icons.search),
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                children: _optionTiles(theme),
+              ),
+            ),
+            if (widget.showDescription)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                child: TextField(
+                  controller: _desc,
+                  focusNode: _focus,
+                  maxLines: 2,
+                  decoration: InputDecoration(
+                    labelText: 'Description',
+                    border: const OutlineInputBorder(),
+                    suffixIcon: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.keyboard_alt),
+                          tooltip: 'Keyboard',
+                          onPressed: () => _focus.requestFocus(),
+                        ),
+                        IconButton(
+                          icon: Icon(_listening ? Icons.mic : Icons.mic_none,
+                              color: _listening ? Colors.red : null),
+                          tooltip: _listening ? 'Stop dictation' : 'Dictate',
+                          onPressed: _toggleMic,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+              child: SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: FilledButton(
+                  onPressed: _done,
+                  child: const Text('Done'),
+                ),
               ),
             ),
           ],
