@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v47';
+const String kBuildTag = 'v48';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -488,10 +488,6 @@ class _ABCLoggingScreenState extends State<ABCLoggingScreen> {
   final behaviorFocusNode = FocusNode();
   final consequenceFocusNode = FocusNode();
 
-  final SpeechToText _speech = SpeechToText();
-  bool _speechEnabled = false;
-  bool _isListening = false;
-  TextEditingController? _activeController;
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
   Map<String, dynamic>? _lastAiMeta;
 
@@ -528,7 +524,6 @@ class _ABCLoggingScreenState extends State<ABCLoggingScreen> {
   @override
   void initState() {
     super.initState();
-    _initSpeech();
     // Load the local cache first (instant), then sync the shared data and poll
     // so entries from all pilot users stay in sync.
     _loadSavedLogs().then((_) => _syncFromServer());
@@ -678,27 +673,6 @@ ${buffer.toString()}''';
         };
       });
     }
-  }
-
-  Future<void> _initSpeech() async {
-    try {
-      _speechEnabled = await _speech.initialize(
-        onStatus: (status) {
-          if (status == 'done' || status == 'notListening') {
-            if (mounted) setState(() => _isListening = false);
-          }
-        },
-        onError: (errorNotification) {
-          if (mounted) setState(() => _isListening = false);
-        },
-      );
-    } catch (error) {
-      // Voice input may be unavailable on some platforms (e.g. desktop);
-      // the app stays fully usable without it.
-      _speechEnabled = false;
-      debugPrint('Speech recognition unavailable: $error');
-    }
-    if (mounted) setState(() {});
   }
 
   Future<void> _loadSavedLogs() async {
@@ -1012,49 +986,6 @@ ${buffer.toString()}''';
     ));
   }
 
-  void _onSpeechResult(SpeechRecognitionResult result) {
-    if (_activeController == null) return;
-    setState(() {
-      _activeController!.text = result.recognizedWords;
-      _activeController!.selection = TextSelection.fromPosition(
-        TextPosition(offset: _activeController!.text.length),
-      );
-    });
-    if (result.finalResult) {
-      setState(() {
-        _isListening = false;
-      });
-    }
-  }
-
-  Future<void> _startListening(TextEditingController controller) async {
-    if (!_speechEnabled) {
-      await _initSpeech();
-      if (!mounted) return;
-      if (!_speechEnabled) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Voice input unavailable')),
-        );
-        return;
-      }
-    }
-    if (_isListening && _activeController == controller) {
-      await _speech.stop();
-      setState(() {
-        _isListening = false;
-      });
-      return;
-    }
-    _activeController = controller;
-    await _speech.listen(
-      onResult: _onSpeechResult,
-      listenOptions: SpeechListenOptions(listenFor: const Duration(seconds: 30)),
-    );
-    setState(() {
-      _isListening = true;
-    });
-  }
-
   Future<void> _pickDateTime() async {
     final DateTime? pickedDate = await showDatePicker(
       context: context,
@@ -1184,18 +1115,6 @@ ${buffer.toString()}''';
         SnackBar(content: Text('Could not save the event: $e')),
       );
     }
-  }
-
-  /// Builds a microphone toggle that reflects whether this field is actively
-  /// being dictated into.
-  Widget _micButton(TextEditingController controller) {
-    final active = _isListening && _activeController == controller;
-    return IconButton(
-      icon: Icon(active ? Icons.mic : Icons.mic_none),
-      color: active ? Colors.red : null,
-      tooltip: active ? 'Stop dictation' : 'Dictate',
-      onPressed: () => _startListening(controller),
-    );
   }
 
   /// One tappable "Incident Metrics" card (Antecedent / Behavior / ...).
@@ -1789,7 +1708,6 @@ ${buffer.toString()}''';
   @override
   void dispose() {
     _syncTimer?.cancel();
-    _speech.stop();
     antecedentDescController.dispose();
     behaviorDescController.dispose();
     consequenceDescController.dispose();
