@@ -33,6 +33,9 @@ class LogStore {
   // save-time older than this are rejected, so a client that still has stale
   // data cached can't re-push it after a reset.
   int _clearedAt = 0;
+  // Tombstoned ids: entries explicitly removed via DELETE ?id=... A client that
+  // still has one cached can't resurrect it by re-pushing on its next sync.
+  final Set<String> _deleted = {};
   Future<void> _chain = Future<void>.value();
 
   LogStore(this._file);
@@ -51,6 +54,9 @@ class LogStore {
           _logs = ((data['logs'] as List?) ?? [])
               .map((e) => Map<String, dynamic>.from(e as Map))
               .toList();
+          _deleted
+            ..clear()
+            ..addAll(((data['deleted'] as List?) ?? []).map((e) => '$e'));
         }
       }
     } catch (e) {
@@ -67,8 +73,11 @@ class LogStore {
   Future<void> upsert(Map<String, dynamic> entry) {
     final id = entry['id'];
     if (id == null) return Future<void>.value();
-    // Reject stale re-pushes of entries created before the last reset.
+    // Reject stale re-pushes of entries created before the last reset, or of
+    // entries that were explicitly deleted (tombstoned) — so a cached client
+    // can't resurrect a removed entry.
     if (_saveTimeOf(entry) < _clearedAt) return Future<void>.value();
+    if (_deleted.contains('$id')) return Future<void>.value();
     return _serialize(() async {
       final idx = _logs.indexWhere((e) => e['id'] == id);
       if (idx >= 0) {
@@ -83,6 +92,7 @@ class LogStore {
   Future<void> remove(String id) =>
       _serialize(() async {
         _logs.removeWhere((e) => e['id'] == id);
+        _deleted.add(id); // tombstone so it can't be re-pushed from a cache
         await _persist();
       });
 
@@ -91,13 +101,19 @@ class LogStore {
       _serialize(() async {
         _logs = [];
         _clearedAt = now;
+        _deleted.clear(); // full wipe resets tombstones; clearedAt guards re-push
         await _persist();
       });
 
   Future<void> _persist() async {
     final tmp = File('${_file.path}.tmp');
     await tmp.writeAsString(
-        jsonEncode({'clearedAt': _clearedAt, 'logs': _logs}), flush: true);
+        jsonEncode({
+          'clearedAt': _clearedAt,
+          'logs': _logs,
+          'deleted': _deleted.toList(),
+        }),
+        flush: true);
     await tmp.rename(_file.path);
   }
 
