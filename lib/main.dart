@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v49';
+const String kBuildTag = 'v50';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -4198,7 +4198,12 @@ class _IncidentPickerScreenState extends State<IncidentPickerScreen> {
     if (!_speechReady) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Voice input unavailable')),
+          const SnackBar(
+            content: Text(
+                "Voice typing isn't supported in this browser. On iPhone/iPad, "
+                "tap the box and use the 🎤 key on the keyboard to dictate."),
+            duration: Duration(seconds: 4),
+          ),
         );
       }
       return;
