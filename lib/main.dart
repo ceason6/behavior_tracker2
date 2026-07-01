@@ -124,7 +124,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v52';
+const String kBuildTag = 'v53';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -194,6 +194,7 @@ Future<pw.ThemeData> _pdfUnicodeTheme() {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await _loadThemePref();
   runApp(const MyApp());
 }
 
@@ -250,36 +251,76 @@ class _AbcPathLogoPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
+/// App-wide light/dark preference, persisted per device. The app-bar toggle
+/// flips this and MyApp rebuilds via ValueListenableBuilder.
+final ValueNotifier<ThemeMode> kThemeMode = ValueNotifier(ThemeMode.dark);
+const String _kThemePrefKey = 'themeMode';
+
+Future<void> _loadThemePref() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    switch (prefs.getString(_kThemePrefKey)) {
+      case 'light':
+        kThemeMode.value = ThemeMode.light;
+        break;
+      case 'dark':
+        kThemeMode.value = ThemeMode.dark;
+        break;
+    }
+  } catch (_) {}
+}
+
+Future<void> _saveThemePref(ThemeMode m) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+        _kThemePrefKey, m == ThemeMode.light ? 'light' : 'dark');
+  } catch (_) {}
+}
+
+/// One theme builder for both brightnesses so light and dark stay in sync.
+ThemeData _appTheme(Brightness b) {
+  final dark = b == Brightness.dark;
+  return ThemeData(
+    useMaterial3: true,
+    brightness: b,
+    colorScheme: ColorScheme.fromSeed(
+      seedColor: const Color(0xFF00897B), // teal brand accent
+      brightness: b,
+    ),
+    scaffoldBackgroundColor:
+        dark ? const Color(0xFF0C1411) : const Color(0xFFEEF2F1),
+    cardColor: dark ? const Color(0xFF16201B) : Colors.white,
+    cardTheme: CardThemeData(
+      color: dark ? const Color(0xFF16201B) : Colors.white,
+      elevation: dark ? 4 : 2,
+      shadowColor: Colors.black,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(
+          color: const Color(0xFF2DD4BF).withValues(alpha: dark ? 0.55 : 0.35),
+          width: dark ? 1.4 : 1.0,
+        ),
+      ),
+    ),
+  );
+}
+
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'ABC Behavior Tracker',
-      theme: ThemeData(
-        useMaterial3: true,
-        brightness: Brightness.dark,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF00897B), // teal brand accent
-          brightness: Brightness.dark,
-        ),
-        scaffoldBackgroundColor: const Color(0xFF0C1411), // dark green-black (Oura)
-        cardColor: const Color(0xFF16201B), // green-tinted dark card
-        cardTheme: CardThemeData(
-          color: const Color(0xFF16201B),
-          elevation: 4,
-          shadowColor: Colors.black,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-            side: BorderSide(
-                color: const Color(0xFF2DD4BF).withValues(alpha: 0.55),
-                width: 1.4),
-          ),
-        ),
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: kThemeMode,
+      builder: (context, mode, _) => MaterialApp(
+        title: 'ABC Behavior Tracker',
+        theme: _appTheme(Brightness.light),
+        darkTheme: _appTheme(Brightness.dark),
+        themeMode: mode,
+        home: const ABCLoggingScreen(),
+        debugShowCheckedModeBanner: false,
       ),
-      home: const ABCLoggingScreen(),
-      debugShowCheckedModeBanner: false,
     );
   }
 }
@@ -1131,26 +1172,28 @@ ${buffer.toString()}''';
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF16201B),
+        color: theme.cardColor,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white12),
+        border: Border.all(color: theme.dividerColor),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.fact_check_outlined, size: 16, color: Colors.grey[400]),
+              Icon(Icons.fact_check_outlined,
+                  size: 16, color: theme.colorScheme.onSurfaceVariant),
               const SizedBox(width: 6),
               Text('REVIEW',
                   style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.6,
-                      color: Colors.grey[400])),
+                      color: theme.colorScheme.onSurfaceVariant)),
               const Spacer(),
               Text(_formatDateTime(selectedDateTime),
-                  style: TextStyle(fontSize: 12, color: Colors.grey[300])),
+                  style: TextStyle(
+                      fontSize: 12, color: theme.colorScheme.onSurfaceVariant)),
             ],
           ),
           const SizedBox(height: 8),
@@ -1172,7 +1215,8 @@ ${buffer.toString()}''';
                     border: Border.all(color: color.withValues(alpha: 0.5)),
                   ),
                   child: Text('${e[0]}: ${e[1]}',
-                      style: const TextStyle(fontSize: 12, color: Colors.white)),
+                      style: TextStyle(
+                          fontSize: 12, color: theme.colorScheme.onSurface)),
                 );
               }).toList(),
             ),
@@ -1191,12 +1235,13 @@ ${buffer.toString()}''';
     bool isRequired = false,
     required VoidCallback onTap,
   }) {
+    final theme = Theme.of(context);
     final done = value != null;
     final borderAlpha = done ? 0.9 : (isRequired ? 0.7 : 0.4);
     final glowAlpha = done ? 0.35 : (isRequired ? 0.28 : 0.15);
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF16201B),
+        color: theme.cardColor,
         borderRadius: BorderRadius.circular(14),
         border:
             Border.all(color: accent.withValues(alpha: borderAlpha), width: 2.4),
@@ -1252,7 +1297,7 @@ ${buffer.toString()}''';
                           fontWeight: FontWeight.w700,
                           fontSize: 12,
                           letterSpacing: 0.3,
-                          color: Colors.grey[200],
+                          color: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ),
@@ -1273,7 +1318,7 @@ ${buffer.toString()}''';
                     fontSize: 14.5,
                     fontWeight: done ? FontWeight.w600 : FontWeight.w400,
                     color: done
-                        ? Colors.white
+                        ? theme.colorScheme.onSurface
                         : (isRequired ? accent : Colors.grey[500]),
                   ),
                 ),
@@ -1326,7 +1371,6 @@ ${buffer.toString()}''';
     final theme = Theme.of(context);
     final sectionHeadingStyle = theme.textTheme.titleMedium?.copyWith(
       fontWeight: FontWeight.w700,
-      color: Colors.grey[200],
     );
 
     return Scaffold(
@@ -1337,6 +1381,21 @@ ${buffer.toString()}''';
         ),
         title: Text('New ABC Behavior Log  ($kBuildTag)'),
         actions: [
+          IconButton(
+            icon: Icon(kThemeMode.value == ThemeMode.dark
+                ? Icons.light_mode_outlined
+                : Icons.dark_mode_outlined),
+            tooltip: kThemeMode.value == ThemeMode.dark
+                ? 'Switch to light mode'
+                : 'Switch to dark mode',
+            onPressed: () {
+              final next = kThemeMode.value == ThemeMode.dark
+                  ? ThemeMode.light
+                  : ThemeMode.dark;
+              kThemeMode.value = next;
+              _saveThemePref(next);
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.insights),
             tooltip: 'School dashboard',
@@ -1466,7 +1525,7 @@ ${buffer.toString()}''';
                   children: [
                     Text('$filled of 4 added',
                         style: theme.textTheme.bodySmall?.copyWith(
-                            color: Colors.grey[300],
+                            color: theme.colorScheme.onSurfaceVariant,
                             fontWeight: FontWeight.w600)),
                     if (selectedBehavior == null) ...[
                       Text('   ·   ',
@@ -1604,7 +1663,7 @@ ${buffer.toString()}''';
                         side: BorderSide(
                             color: selectedIntensity == level[0]
                                 ? level[1] as Color
-                                : Colors.white24,
+                                : theme.dividerColor,
                             width: selectedIntensity == level[0] ? 1.8 : 1),
                         onSelected: (sel) => setState(() =>
                             selectedIntensity = sel ? level[0] as String : null),
@@ -1651,7 +1710,7 @@ ${buffer.toString()}''';
                 const SizedBox(height: 16),
                 Text(
                   'Saved behavior logs',
-                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700, color: Colors.grey[200]),
+                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 12),
                 ..._sortedLogs().map((log) {
@@ -1881,7 +1940,7 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
   Widget _buildProactiveStrategyTable(BuildContext context) {
     final theme = Theme.of(context);
     final subtitleStyle = theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600);
-    final labelStyle = theme.textTheme.bodyMedium?.copyWith(color: Colors.grey[700]);
+    final labelStyle = theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant);
     final frequency = _buildProactiveStrategyFrequency();
 
     if (frequency.isEmpty) {
@@ -1935,7 +1994,7 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
               );
             }),
             const SizedBox(height: 12),
-            Text('Total strategies recorded: $total', style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[700])),
+            Text('Total strategies recorded: $total', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
           ],
         ),
       ),
@@ -2340,7 +2399,7 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
             const SizedBox(height: 16),
             Text(
               'Count by period',
-              style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[700]),
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),
             const SizedBox(height: 8),
             ...periods.asMap().entries.map((e) {
@@ -2491,7 +2550,7 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
             const SizedBox(height: 12),
             Text(
               'Events per ${_granularity.unit}',
-              style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[700]),
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),
           ],
         ),
@@ -2588,7 +2647,7 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
             const SizedBox(height: 12),
             Text(
               'Total events over time (per ${_granularity.unit})',
-              style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[700]),
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),
           ],
         ),
@@ -2604,7 +2663,7 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
     final dates = grouped.keys.toList()..sort((a, b) => b.compareTo(a));
     final theme = Theme.of(context);
     final subtitleStyle = theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600);
-    final frequencyLabelStyle = theme.textTheme.bodyMedium?.copyWith(color: Colors.grey[700]);
+    final frequencyLabelStyle = theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant);
 
     // Headline stats for this student (mirrors the school dashboard tiles).
     String maxKey(Map<String, int> m) => m.isEmpty
@@ -2826,7 +2885,7 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
                                   });
                                 })(),
                                 const SizedBox(height: 12),
-                                Text('Total events: $totalCount', style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[700])),
+                                Text('Total events: $totalCount', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
                               ],
                             );
                           },
@@ -3439,7 +3498,7 @@ Be concise and base every statement on the provided data. If the data are insuff
               showsCustom
                   ? '${_dateKey(start)} → ${_dateKey(end)}  (tap to change)'
                   : '${_dateKey(start)} → ${_dateKey(end)}',
-              style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[700]),
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -3518,7 +3577,7 @@ Be concise and base every statement on the provided data. If the data are insuff
                 style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
             const SizedBox(height: 4),
             Text('Tip: use Weekly/Monthly if Daily looks crowded.',
-                style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[600])),
+                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
             const SizedBox(height: 16),
             SizedBox(
               height: 260,
@@ -3717,7 +3776,7 @@ Be concise and base every statement on the provided data. If the data are insuff
         child: Padding(
           padding: const EdgeInsets.all(14.0),
           child: Text('$title — no data yet.',
-              style: theme.textTheme.bodyMedium?.copyWith(color: Colors.grey[700])),
+              style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
         ),
       );
     }
@@ -3741,10 +3800,15 @@ Be concise and base every statement on the provided data. If the data are insuff
     // Grayscale ramp: empty = white, low = light gray, high = near-black.
     // Color gradient matching the Overview: high = red, low = blue (empty =
     // white). In B&W mode, a grayscale ramp instead (copier-friendly).
+    final heatmapDark = kThemeMode.value == ThemeMode.dark;
     Color cellColor(int v) {
-      // Empty cells: white for B&W/print, muted dark in the on-screen view so
-      // they blend with the dark theme and only cells with data stand out.
-      if (v <= 0) return _bw ? Colors.white : const Color(0xFF202A24);
+      // Empty cells: white for B&W/print; a muted tone on screen so only cells
+      // with data stand out (dark tone in dark mode, light tone in light mode).
+      if (v <= 0) {
+        return _bw
+            ? Colors.white
+            : (heatmapDark ? const Color(0xFF202A24) : const Color(0xFFE8ECF0));
+      }
       final t = (v / (maxV == 0 ? 1 : maxV)).clamp(0.0, 1.0);
       if (_bw) {
         return Color.lerp(const Color(0xFFEEEEEE), const Color(0xFF222222),
@@ -3794,7 +3858,9 @@ Be concise and base every statement on the provided data. If the data are insuff
             border: Border.all(
                 color: _bw
                     ? Colors.black12
-                    : Colors.white.withValues(alpha: 0.08),
+                    : (heatmapDark
+                        ? Colors.white.withValues(alpha: 0.08)
+                        : Colors.black.withValues(alpha: 0.10)),
                 width: 0.5)),
         child: Text(v > 0 ? '$v' : '',
             style: TextStyle(fontSize: 11, color: fg, fontWeight: FontWeight.w600)),
@@ -3825,7 +3891,7 @@ Be concise and base every statement on the provided data. If the data are insuff
             Text(title, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
             const SizedBox(height: 4),
             Text('${_bw ? 'Darker' : 'Red'} = more frequent · Total column/row included',
-                style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[600])),
+                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
             const SizedBox(height: 12),
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
