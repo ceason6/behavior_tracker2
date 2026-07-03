@@ -21,6 +21,28 @@ import 'io_download.dart' if (dart.library.html) 'web_download.dart';
 /// Two-digit zero-padded string for clock/date components.
 String _two(int value) => value.toString().padLeft(2, '0');
 
+/// Full month names for readable report labels.
+const List<String> _kMonthNames = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+/// Sortable "YYYY-MM" bucket key for grouping logs by calendar month.
+String _monthKey(DateTime timestamp) {
+  final local = timestamp.toLocal();
+  return '${local.year}-${_two(local.month)}';
+}
+
+/// Human-readable month label (e.g. "July 2026") for a "YYYY-MM" key.
+String _monthLabelFromKey(String key) {
+  final parts = key.split('-');
+  if (parts.length != 2) return key;
+  final year = parts[0];
+  final month = int.tryParse(parts[1]) ?? 0;
+  if (month < 1 || month > 12) return key;
+  return '${_kMonthNames[month - 1]} $year';
+}
+
 /// Safe read of a string field from a persisted log entry. Returns '' when the
 /// value is missing or not a string, so a malformed/legacy entry can't crash
 /// the UI.
@@ -124,7 +146,7 @@ String _bucketLabel(String bucketKey, TimeGranularity granularity) {
 /// tag does NOT appear in an error message, the browser is running a stale
 /// cached bundle (clear site data); if it DOES appear, the suffixed detail shows
 /// the real underlying error.
-const String kBuildTag = 'v53';
+const String kBuildTag = 'v54';
 
 /// Master switch for the generative-AI features (FBA analysis + the "Generate
 /// Description" helper). Turned OFF during the pilot so no student data is sent
@@ -2038,6 +2060,14 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
     }
     final dailyEntries = dailyData.entries.toList()..sort((a, b) => b.key.compareTo(a.key));
 
+    final monthlyData = <String, int>{};
+    for (final log in studentLogs) {
+      final key = _monthKey(_logTimestamp(log));
+      monthlyData[key] = (monthlyData[key] ?? 0) + 1;
+    }
+    // Most recent month first, matching the daily table's ordering.
+    final monthlyEntries = monthlyData.entries.toList()..sort((a, b) => b.key.compareTo(a.key));
+
     final sectionStyle = pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold);
     String share(int value, int total) => total > 0 ? '${(value / total * 100).toStringAsFixed(1)}%' : '0.0%';
 
@@ -2088,6 +2118,25 @@ class _StudentHistoryScreenState extends State<StudentHistoryScreen> {
             pw.TableHelper.fromTextArray(
               headers: ['Period', 'Count'],
               data: periodEntries.map((e) => [e.key, e.value.toString()]).toList(),
+              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+              cellAlignment: pw.Alignment.centerLeft,
+            ),
+          pw.SizedBox(height: 16),
+
+          pw.Text('Monthly Frequency', style: sectionStyle),
+          pw.SizedBox(height: 6),
+          if (monthlyEntries.isEmpty)
+            pw.Text('No events recorded.')
+          else
+            pw.TableHelper.fromTextArray(
+              headers: ['Month', 'Events', 'Share'],
+              data: monthlyEntries
+                  .map((e) => [
+                        _monthLabelFromKey(e.key),
+                        e.value.toString(),
+                        share(e.value, totalEvents),
+                      ])
+                  .toList(),
               headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
               cellAlignment: pw.Alignment.centerLeft,
             ),
